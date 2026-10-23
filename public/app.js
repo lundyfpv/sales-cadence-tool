@@ -544,7 +544,7 @@ function viewSettings() {
   const th = { ...DEFAULT_SETTINGS.theme, ...(s.theme || {}) };
   return `<div class="toolbar"><h2>Settings</h2><span class="spacer"></span><a class="btn" href="/admin">Admin: login, HTTPS, backups</a></div><div class="settings">
     <div class="panel"><h3>Appearance</h3>
-      <div class="fld"><span>Light or dark</span><div class="seg">${[['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<button data-act="theme-mode" data-v="${k}" aria-pressed="${th.mode === k}">${l}</button>`).join('')}</div></div>
+      <div class="fld"><span>Theme</span><div class="seg">${[['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark'], ['oled', 'OLED black']].map(([k, l]) => `<button data-act="theme-mode" data-v="${k}" aria-pressed="${th.mode === k}">${l}</button>`).join('')}</div></div>
       <div class="fld"><span>Accent color</span><div class="swatches">${ACCENTS.map(([k, l, c]) => `<button class="swatch-btn" data-act="theme-accent" data-v="${k}" aria-pressed="${th.accent === k}" title="${l}" aria-label="${l}" style="background:${c}"></button>`).join('')}</div></div>
       <div class="fld"><span>Calendar weeks start on</span><div class="seg">${[[0, 'Sunday'], [1, 'Monday']].map(([k, l]) => `<button data-act="week-start" data-v="${k}" aria-pressed="${ws === k}">${l}</button>`).join('')}</div></div>
       <p class="muted small" style="margin:0">Saved to your account, so your phone and computer match.</p>
@@ -1220,11 +1220,30 @@ menuBtn.onclick = e => { e.stopPropagation(); menuPop.hidden = !menuPop.hidden; 
 document.addEventListener('click', e => { if (!menuPop.hidden && !menuPop.contains(e.target)) { menuPop.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); } });
 $('#menu-theme').onclick = async () => {
   const th = { ...DEFAULT_SETTINGS.theme, ...(set().theme || {}) };
-  const dark = th.mode === 'dark' || (th.mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+  const dark = th.mode === 'dark' || th.mode === 'oled' || (th.mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   await saveSettings({ theme: { ...th, mode: dark ? 'light' : 'dark' } }); applyTheme(); render();
 };
 $('#menu-out').onclick = async () => { try { await api('POST', '/api/logout'); } catch (e) {} location.href = '/login'; };
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+// Install as an app: use the browser's own prompt when it offers one, otherwise explain how
+let installPrompt = null;
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+if (standalone()) $('#menu-install').hidden = true;
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; });
+addEventListener('appinstalled', () => { installPrompt = null; $('#menu-install').hidden = true; toast('Installed. Open it from your home screen.'); });
+$('#menu-install').onclick = async () => {
+  menuPop.hidden = true;
+  if (installPrompt) { installPrompt.prompt(); const { outcome } = await installPrompt.userChoice; if (outcome === 'accepted') installPrompt = null; return; }
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  openDialog(`
+    <div class="dlg-h"><h2>Install the app</h2><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="dlg-b">
+      ${!isSecureContext ? `<div class="note warn">You're on a plain <b>http://</b> address, so your phone can only add a shortcut, not install the app. Open the app at its <b>https://</b> address instead. You can set that up under Admin → HTTPS.</div>` : ''}
+      ${ios ? `<ol class="steps"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button.</li><li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li></ol>`
+        : `<ol class="steps"><li>Open this page in <b>Chrome</b>.</li><li>Tap the <b>⋮</b> menu at the top right.</li><li>Tap <b>Install app</b> (or <b>Add to Home screen</b>, then <b>Install</b>).</li></ol><p class="muted small" style="margin:0">If you don't see Install app, the app may already be installed. Check your home screen and app drawer for Sales Cadence Tool.</p>`}
+    </div>
+    <div class="dlg-f"><span class="spacer"></span><button class="btn primary" data-close>Got it</button></div>`, () => {});
+};
 render();
 loadState().then(listen);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) loadState(); });
