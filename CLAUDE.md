@@ -1,4 +1,4 @@
-# Cadence Book: notes for Claude
+# Sales Cadence Tool: notes for Claude
 
 Read this before you change anything. It covers what the app does, how it's built, and how it gets deployed.
 
@@ -27,9 +27,9 @@ Alec, a field sales rep, uses it alone. He sees customers on a cadence (usually 
 - `public/admin.*`, `public/login.*`: the admin and login pages. `theme.js` applies light/dark mode and the accent color before first paint.
 
 ## Data model
-- **customers**: name, contact, phone, email, address, kind (visit|call|email|text), cadence, unit (weeks|days), homeDay (0–6 or ''), preferredTime, duration, active, notes, lastTouch, rhythmDate.
+- **customers**: name, custId (the customer's own ID, free text), contact, phone, email, address, kind (visit|call|email|text), cadence, unit (weeks|days), homeDay (0–6 or ''), preferredTime, duration, active, notes, lastTouch, rhythmDate.
 - **appointments**: customerId, name, kind, date (YYYY-MM-DD), time (HH:MM or '' = all day), duration, status (proposed|confirmed|completed|missed|cancelled), rhythmDate, notes (agenda), recap, recapSent.
-- **config/settings**: visitDays, officeDays, dayStart/End, visitLength, buffer, maxVisitsPerDay, default cadence, autoNext, blackouts[], message templates, theme {mode, accent}.
+- **config/settings**: visitDays, officeDays, dayStart/End, visitLength, buffer, maxVisitsPerDay, default cadence, autoNext, blackouts[], message templates, theme {mode, accent}, weekStart (0 = Sunday, the default; 1 = Monday; only affects the Week and Month calendars).
 
 ## Cadence rules (agreed with Alec; don't change them without asking)
 - The next due date is counted from the appointment's **rhythmDate** (its original slot), not from the day it actually happened.

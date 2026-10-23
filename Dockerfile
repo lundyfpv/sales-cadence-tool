@@ -1,4 +1,4 @@
-# Cadence Book — no npm dependencies; uses Node's built-in SQLite and crypto.
+# Sales Cadence Tool — no npm dependencies; uses Node's built-in SQLite and crypto.
 FROM node:22-bookworm-slim
 
 ENV NODE_ENV=production \

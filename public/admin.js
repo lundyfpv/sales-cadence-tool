@@ -52,7 +52,7 @@
     if (on) $('t-off').onclick = async () => { try { await api('POST', '/api/admin/totp/disable', { password: $('t-pw').value }); toast('Two-step codes are off.'); load(); } catch (e) { toast(e.message); } };
     else $('t-begin').onclick = async () => {
       const d = await api('POST', '/api/admin/totp/begin');
-      $('t-setup').innerHTML = `<ol class="steps small"><li>In your authenticator app, add an account and choose <b>Enter a setup key</b> (or tap the link below on your phone).</li><li>Account: <b>Cadence Book</b>. Key: <code class="copyable" style="user-select:all">${esc(d.secret.replace(/(.{4})/g, '$1 ').trim())}</code>. Type: time-based.</li><li>Enter the 6-digit code it shows.</li></ol><a class="small" href="${esc(d.uri)}">Open in authenticator app</a><div class="row"><input class="inp" id="t-code" inputmode="numeric" maxlength="6" placeholder="123456" style="max-width:140px"><button class="btn primary" id="t-on">Turn on</button></div>`;
+      $('t-setup').innerHTML = `<ol class="steps small"><li>In your authenticator app, add an account and choose <b>Enter a setup key</b> (or tap the link below on your phone).</li><li>Account: <b>Sales Cadence Tool</b>. Key: <code class="copyable" style="user-select:all">${esc(d.secret.replace(/(.{4})/g, '$1 ').trim())}</code>. Type: time-based.</li><li>Enter the 6-digit code it shows.</li></ol><a class="small" href="${esc(d.uri)}">Open in authenticator app</a><div class="row"><input class="inp" id="t-code" inputmode="numeric" maxlength="6" placeholder="123456" style="max-width:140px"><button class="btn primary" id="t-on">Turn on</button></div>`;
       $('t-on').onclick = async () => { try { await api('POST', '/api/admin/totp/enable', { code: $('t-code').value }); toast('Two-step codes are on. You\'ll need a code at each sign-in.'); load(); } catch (e) { toast(e.message); } };
     };
   }
@@ -76,7 +76,7 @@
   $('b-file').onchange = async () => {
     const f = $('b-file').files[0]; if (!f) return;
     try { pending = JSON.parse(await f.text()); } catch (e) { $('b-msg').textContent = 'That file isn\'t valid JSON.'; return; }
-    if (pending.app !== 'cadence-book') { $('b-msg').textContent = 'That file isn\'t a Cadence Book backup.'; pending = null; return; }
+    if (pending.app !== 'cadence-book') { $('b-msg').textContent = 'That file isn\'t a Sales Cadence Tool backup.'; pending = null; return; }
     $('b-what').textContent = `Replace all current data with ${pending.customers.length} customers and ${pending.appointments.length} appointments from ${new Date(pending.exported).toLocaleString()}? Attached files aren't touched.`;
     $('b-confirm').hidden = false;
   };
