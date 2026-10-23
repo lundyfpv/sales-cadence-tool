@@ -1,0 +1,22 @@
+services:
+  cadence-book:
+    build: .
+    image: cadence-book:latest
+    container_name: cadence-book
+    restart: unless-stopped
+    # TrueNAS's "apps" user is 568. Make sure the data folder below is owned by it
+    # (or change this to match the owner of your dataset).
+    user: "568:568"
+    environment:
+      TZ: America/Chicago
+      # Port your router sends HTTPS traffic to on the outside (used for redirects).
+      PUBLIC_HTTPS_PORT: "443"
+      # Set to "true" only if you put this behind a reverse proxy.
+      TRUST_PROXY: "false"
+      MAX_UPLOAD_MB: "25"
+    ports:
+      - "8080:8080"   # HTTP (router: outside 80  -> NAS 8080)
+      - "8443:8443"   # HTTPS (router: outside 443 -> NAS 8443)
+    volumes:
+      # Change the left side to a dataset on your pool.
+      - /mnt/tank/apps/cadence-book:/data

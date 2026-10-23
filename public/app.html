@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Cadence Book</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cadence">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="/app.css">
+<script src="/theme.js"></script>
+</head>
+<body>
+<div class="top"><div class="top-in gut">
+  <a class="brand" href="/"><img src="/icons/icon-192.png" alt=""><h1>Cadence Book</h1></a>
+  <nav class="tabs" id="tabs" aria-label="Views"></nav>
+  <span class="sync" id="sync">Connecting…</span>
+  <div class="menu">
+    <button class="menu-btn" id="menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="Account menu"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="5.5" r="2.8"/><path d="M2.5 14c.8-2.6 3-4 5.5-4s4.7 1.4 5.5 4"/></svg></button>
+    <div class="menu-pop" id="menu-pop" hidden>
+      <div class="who" id="menu-who"></div>
+      <button id="menu-theme">Switch light / dark</button>
+      <a href="/admin">Admin: login, HTTPS, backups</a>
+      <button id="menu-out">Sign out</button>
+    </div>
+  </div>
+</div></div>
+<div id="banner" class="banner gut" hidden></div>
+<main class="gut" id="main"></main>
+<div id="dlgs"></div>
+<div id="toast" class="toast" hidden role="status"></div>
+<script src="/xlsx-lite.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Sign in · Cadence Book</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cadence">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="/app.css">
+<script src="/theme.js"></script>
+</head>
+<body>
+<div class="auth-wrap">
+  <form class="auth" id="f" novalidate>
+    <img class="logo" src="/icons/icon-192.png" alt="">
+    <h1 id="ttl">Sign in</h1>
+    <p class="muted" id="lead" style="margin:0">Cadence Book</p>
+    <label class="fld"><span>Username</span><input id="u" name="username" autocomplete="username" autocapitalize="none" required></label>
+    <label class="fld"><span>Password</span><input id="p" name="password" type="password" autocomplete="current-password" required></label>
+    <label class="fld" id="p2w" hidden><span>Confirm password</span><input id="p2" type="password" autocomplete="new-password"></label>
+    <label class="fld" id="cw" hidden><span>6-digit code from your authenticator app</span><input id="c" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*"></label>
+    <div class="err" id="err" role="alert"></div>
+    <button class="btn primary" id="go" type="submit" style="justify-content:center;padding:10px">Sign in</button>
+  </form>
+</div>
+<script src="/login.js"></script>
+</body>
+</html>

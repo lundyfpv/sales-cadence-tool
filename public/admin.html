@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Admin · Cadence Book</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cadence">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="/app.css">
+<script src="/theme.js"></script>
+</head>
+<body>
+<div class="top"><div class="top-in gut">
+  <a class="brand" href="/"><img src="/icons/icon-192.png" alt=""><h1>Cadence Book</h1></a>
+  <span class="spacer"></span>
+  <a class="btn" href="/">← Back to planner</a>
+</div></div>
+<main class="admin gut">
+  <h2 style="font-size:1.6rem">Admin</h2>
+
+  <section class="panel" id="https">
+    <div class="row"><h3>HTTPS certificate</h3><span class="spacer"></span><span class="pill" id="cert-pill">Checking…</span></div>
+    <dl class="kv" id="cert-info"></dl>
+    <details id="howto">
+      <summary><b>Before you start: router and DNS checklist</b></summary>
+      <ol class="steps small" style="margin-top:8px">
+        <li>Point a domain or subdomain (for example <code>planner.yourname.com</code>) at your home's public IP address. If your IP changes, use a dynamic DNS service such as DuckDNS or your registrar's DDNS.</li>
+        <li>On your router, forward outside port <b>80</b> → this server's port <b id="p-http">8080</b>, and outside port <b>443</b> → port <b id="p-https">8443</b>. Don't forward to TrueNAS's own 80/443; those belong to the TrueNAS web UI.</li>
+        <li>Save the domain below and click <b>Check port 80</b>. Some routers can't test their own public address from inside your network, so a failed check doesn't always mean it won't work.</li>
+        <li>Click <b>Test with staging</b> first. It uses Let's Encrypt's test service, which has generous retry limits. Once that works, click <b>Get real certificate</b>.</li>
+      </ol>
+    </details>
+    <div class="form">
+      <label class="fld"><span>Domain</span><input id="a-domain" placeholder="planner.example.com" autocapitalize="none"></label>
+      <label class="fld"><span>Email for expiry notices</span><input id="a-email" type="email" placeholder="you@example.com"></label>
+      <label class="cb"><input type="checkbox" id="a-renew" checked><span>Renew automatically (checked twice a day; renews 30 days before expiry)</span></label>
+      <label class="cb"><input type="checkbox" id="a-redirect" checked><span>Send http:// visits to https:// for this domain</span></label>
+    </div>
+    <div class="row">
+      <button class="btn" id="a-save">Save</button>
+      <button class="btn" id="a-test">Check port 80</button>
+      <button class="btn" id="a-stage">Test with staging</button>
+      <button class="btn primary" id="a-prod">Get real certificate</button>
+      <span class="muted small" id="a-msg"></span>
+    </div>
+    <div class="log" id="a-log" hidden></div>
+  </section>
+
+  <section class="panel">
+    <h3>Sign-in & security</h3>
+    <dl class="kv"><dt>Username</dt><dd id="s-user"></dd><dt>Two-step codes</dt><dd id="s-totp"></dd><dt>Signed-in devices</dt><dd id="s-sess"></dd></dl>
+    <details><summary><b>Change password</b></summary>
+      <div class="form" style="margin-top:8px"><label class="fld"><span>Current password</span><input type="password" id="pw-cur" autocomplete="current-password"></label><span></span>
+      <label class="fld"><span>New password (10+ characters)</span><input type="password" id="pw-new" autocomplete="new-password"></label><label class="fld"><span>New password again</span><input type="password" id="pw-new2" autocomplete="new-password"></label></div>
+      <div class="row" style="margin-top:8px"><button class="btn primary" id="pw-go">Change password</button><span class="muted small" id="pw-msg"></span></div>
+      <p class="muted small">Other devices are signed out when you change it.</p>
+    </details>
+    <div id="totp-box"></div>
+    <div class="row"><button class="btn" id="s-out">Sign out all other devices</button><span class="muted small" id="s-msg"></span></div>
+  </section>
+
+  <section class="panel">
+    <h3>Backup & restore</h3>
+    <p class="muted small" style="margin:0">The backup file has your customers, appointments and settings. Attached files live in the <code>/data/uploads</code> folder; to cover them too, include the app's data folder in your TrueNAS snapshot or replication schedule.</p>
+    <dl class="kv" id="b-info"></dl>
+    <div class="row"><a class="btn" href="/api/admin/backup" download>Download backup</a>
+      <label class="btn" for="b-file">Restore from backup…</label><input type="file" id="b-file" accept=".json,application/json" hidden><span class="muted small" id="b-msg"></span></div>
+    <div id="b-confirm" hidden class="note bad row"><span style="flex:1;min-width:0" id="b-what"></span><button class="btn danger solid" id="b-go">Replace everything</button><button class="btn" id="b-cancel">Cancel</button></div>
+  </section>
+</main>
+<div id="toast" class="toast" hidden role="status"></div>
+<script src="/admin.js"></script>
+</body>
+</html>

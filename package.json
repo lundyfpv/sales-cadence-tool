@@ -1,0 +1,13 @@
+{
+  "name": "cadence-book",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted customer cadence planner: week calendar, Friday plan, Monday confirmations, recaps and files.",
+  "main": "server/index.js",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "DATA_DIR=./data node --disable-warning=ExperimentalWarning --watch server/index.js"
+  },
+  "engines": { "node": ">=22.13" }
+}
