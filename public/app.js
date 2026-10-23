@@ -453,14 +453,14 @@ function viewPlan() {
         <div class="loadbars">${loads.map(({ d, v, tc }) => { const office = set().officeDays.includes(dow(d)); return `<div class="lb ${office ? 'office' : ''} ${v > cap ? 'over' : ''}"><div class="label">${DAYS[dow(d)]}</div><div class="big">${v}</div><div class="muted small">${office ? 'office' : 'of ' + cap}${tc ? ' · ' + tc + ' calls' : ''}</div>${office ? '' : `<div class="bar"><i style="width:${Math.min(100, v / cap * 100)}%"></i></div>`}${isBlackout(d) ? `<div class="pill bad" style="margin-top:4px">${esc(blackoutLabel(d))}</div>` : ''}</div>`; }).join('')}</div>
         <button class="btn sm" data-act="goto-week" data-date="${ws}">Open this week on the calendar</button>
       </div>
-      <div class="panel"><div class="row"><h3>4 · Due, not scheduled</h3><span class="spacer"></span>${cands.length ? `<button class="btn primary sm" data-act="plan-all">Add all ${cands.length}</button>` : ''}</div>
-        ${cands.length ? `<div class="list">${candRows}</div>` : '<div class="empty">Nothing is waiting. Everyone due this week has something scheduled.</div>'}
-      </div>
       <div class="panel"><div class="row"><h3>Upcoming appointments</h3><span class="spacer"></span>${taskCount ? `<span class="pill warn">${taskCount} action item${taskCount === 1 ? '' : 's'}</span>` : ''}</div>
         ${upcoming.length ? `<div class="list">${upcoming.map(a => { const items = actionItems(a); return `<div class="li start"><span class="pill ${isTouch(a.kind) ? 'touch' : 'ok'}">${ICON[a.kind] || ICON.visit}</span><div class="grow"><button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button><div class="muted small">${nice(a.date)}${a.time ? ' · ' + t12(a.time) : ''}${a.status === 'proposed' ? ' · proposed' : ''}</div>${items.length ? taskList(items) : '<div class="muted small">No action items</div>'}</div></div>`; }).join('')}</div>` : '<div class="empty">Nothing scheduled that week yet.</div>'}
       </div>
       <div class="panel"><div class="row"><h3>Further out</h3><span class="spacer"></span><span class="muted small">${niceShort(addDays(we, 1))}–${niceShort(farEnd)}</span></div>
         ${further.length ? `<div class="list">${further.map(x => `<div class="li start"><div class="grow"><button class="linkbtn nm" data-act="${x.a ? 'open-appt' : 'open-cust'}" data-id="${x.a ? x.a.id : x.c.id}">${esc(x.a ? apptName(x.a) : custName(x.c))}</button><div class="muted small">${x.a ? nice(x.date) + (x.time ? ' · ' + t12(x.time) : '') : 'Due ' + nice(x.date) + ' · not scheduled'}</div>${taskList(x.items)}</div></div>`).join('')}</div>` : '<div class="empty">No action items for the following three weeks.</div>'}
+      </div>
+      <div class="panel"><div class="row"><h3>4 · Due, not scheduled</h3><span class="spacer"></span>${cands.length ? `<button class="btn primary sm" data-act="plan-all">Add all ${cands.length}</button>` : ''}</div>
+        ${cands.length ? `<div class="list">${candRows}</div>` : '<div class="empty">Nothing is waiting. Everyone due this week has something scheduled.</div>'}
       </div>
     </div>
   </div>`;
