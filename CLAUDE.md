@@ -28,7 +28,7 @@ Alec, a field sales rep, uses it alone. He sees customers on a cadence (usually 
 
 ## Data model
 - **customers**: name, custId (the customer's own ID, free text), contact, phone, email, address, kind (visit|call|email|text), cadence, unit (weeks|days), homeDay (0–6 or ''), preferredTime, duration, active, notes, lastTouch, rhythmDate.
-- **appointments**: customerId, name, kind, date (YYYY-MM-DD), time (HH:MM or '' = all day), duration, status (proposed|confirmed|completed|missed|cancelled), rhythmDate, notes (agenda), recap, recapSent.
+- **appointments**: customerId, name, kind, date (YYYY-MM-DD), time (HH:MM or '' = all day), duration, status (proposed|confirmed|completed|missed|cancelled), rhythmDate, notes (agenda), recap, actions ("My action items": the rep's to-dos before the next meeting, one per line; an upcoming appointment shows its own plus those from the customer's last meeting), recapSent.
 - **config/settings**: visitDays, officeDays, dayStart/End, visitLength, buffer, maxVisitsPerDay, default cadence, autoNext, blackouts[], message templates, theme {mode, accent}, weekStart (0 = Sunday, the default; 1 = Monday; only affects the Week and Month calendars).
 
 ## Cadence rules (agreed with Alec; don't change them without asking)
