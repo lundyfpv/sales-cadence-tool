@@ -4,7 +4,7 @@
   try { const s = await (await fetch('/api/session')).json(); if (s.user) location.href = '/'; setup = s.setupNeeded; } catch (e) {}
   if (setup) {
     $('ttl').textContent = 'Create your account';
-    $('lead').textContent = 'This is the first time Cadence Book has run. Choose the username and password you\'ll sign in with.';
+    $('lead').textContent = 'This is the first time Sales Cadence Tool has run. Choose the username and password you\'ll sign in with.';
     $('p2w').hidden = false; $('p').autocomplete = 'new-password'; $('go').textContent = 'Create account';
   }
   $('u').focus();

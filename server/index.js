@@ -297,7 +297,7 @@ async function handle(req, res) {
     if (p === '/api/admin/totp/begin' && req.method === 'POST') {
       const secret = auth.newTotpSecret();
       pendingTotp.set(user.id, { secret, exp: Date.now() + 10 * 60000 });
-      const issuer = 'Cadence Book';
+      const issuer = 'Sales Cadence Tool';
       const uri = `otpauth://totp/${encodeURIComponent(issuer + ':' + user.username)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
       return send(res, 200, { secret, uri });
     }
@@ -323,7 +323,7 @@ async function handle(req, res) {
     }
     if (p === '/api/admin/restore' && req.method === 'POST') {
       const b = await readJson(req, 64 * 1024 * 1024);
-      if (b.app !== 'cadence-book' || !Array.isArray(b.customers) || !Array.isArray(b.appointments)) return fail(res, 400, 'That file isn\'t a Cadence Book backup.');
+      if (b.app !== 'cadence-book' || !Array.isArray(b.customers) || !Array.isArray(b.appointments)) return fail(res, 400, 'That file isn\'t a Sales Cadence Tool backup.');
       store.transaction(() => {
         store.q.clearDocs.run();
         for (const c of b.customers) { const { id, ...d } = c; if (idOk(id)) store.putDoc('customers', id, d); }
@@ -361,7 +361,7 @@ function reloadTls() {
   }
 }
 http.createServer(handle).listen(HTTP_PORT, () => {
-  console.log(`Cadence Book ${pkg.version} — HTTP listening on :${HTTP_PORT}, data in ${store.DATA_DIR}`);
+  console.log(`Sales Cadence Tool ${pkg.version} — HTTP listening on :${HTTP_PORT}, data in ${store.DATA_DIR}`);
   if (auth.userCount() === 0) console.log('No account yet: open the app in a browser to create one.');
 });
 reloadTls();

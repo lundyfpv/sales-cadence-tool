@@ -1,4 +1,4 @@
-# Cadence Book
+# Sales Cadence Tool
 
 A self-hosted planner for keeping customers on a regular visit/call cadence.
 

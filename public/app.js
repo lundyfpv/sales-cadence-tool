@@ -8,6 +8,8 @@ function addDays(s, n) { const d = toD(s); d.setDate(d.getDate() + n); return fm
 function dow(s) { return toD(s).getDay(); }
 function today() { return fmt(new Date()); }
 function mondayOf(s) { const w = dow(s); return addDays(s, w === 0 ? -6 : 1 - w); }
+// calendar weeks start on Sunday unless the user picks Monday; planning weeks stay Monday-based
+function weekStartOf(s) { const st = +S.settings.weekStart === 1 ? 1 : 0; return addDays(s, -((dow(s) - st + 7) % 7)); }
 function diffDays(a, b) { return Math.round((toD(b) - toD(a)) / 86400000); }
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -38,7 +40,7 @@ const DEFAULT_SETTINGS = {
   signature: '',
   confirmTemplate: 'Hi {first}, just confirming our {kind} on {day} at {time}. Let me know if anything changes. Thanks, {me}',
   recapTemplate: 'Hi {first},\n\nThanks for your time on {day}. Quick recap:\n{recap}\n\nI\'ll touch base again around {next}.\n\nThanks,\n{me}',
-  theme: { mode: 'system', accent: 'slate' },
+  theme: { mode: 'system', accent: 'slate' }, weekStart: 0,
 };
 
 /* ============ state ============ */
@@ -271,12 +273,12 @@ function chip(a, extra = '') {
 }
 
 /* ============ WEEK ============ */
-function weekDays(start) { const n = S.settings.showWeekend ? 7 : 5; return Array.from({ length: n }, (_, i) => addDays(start, i)); }
+function weekDays(start) { if (!S.settings.showWeekend) start = mondayOf(addDays(start, 1)); const n = S.settings.showWeekend ? 7 : 5; return Array.from({ length: n }, (_, i) => addDays(start, i)); }
 function apptsOn(date) { return [...S.appts.values()].filter(a => a.date === date && (a.status !== 'cancelled')); }
 function viewWeek() {
-  const ws = mondayOf(S.anchor), days = weekDays(ws), t = today();
-  const thisW = mondayOf(t), nextW = addDays(thisW, 7);
-  const label = `${toD(ws).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${toD(days[days.length - 1]).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  const ws = weekStartOf(S.anchor), days = weekDays(ws), t = today();
+  const thisW = weekStartOf(t), nextW = addDays(thisW, 7);
+  const label = `${toD(days[0]).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${toD(days[days.length - 1]).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
   const tb = `<div class="toolbar">
     <h2>${ws === thisW ? 'This week' : ws === nextW ? 'Next week' : 'Week of ' + niceShort(ws)}</h2>
     <div class="seg"><button data-act="wk" data-d="-7" aria-label="Previous week">‹</button><button data-act="wk-this" aria-pressed="${ws === thisW}">This week</button><button data-act="wk-next" aria-pressed="${ws === nextW}">Next week</button><button data-act="wk" data-d="7" aria-label="Following week">›</button></div>
@@ -359,9 +361,9 @@ function weekSide(ws, days) {
 /* ============ MONTH ============ */
 function viewMonth() {
   const a = toD(S.monthAnchor), first = fmt(new Date(a.getFullYear(), a.getMonth(), 1, 12));
-  const start = addDays(first, -((dow(first) + 6) % 7)), t = today(), m = a.getMonth();
+  const start = weekStartOf(first), t = today(), m = a.getMonth();
   let h = `<div class="toolbar"><h2>${a.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h2><div class="seg"><button data-act="mo" data-d="-1" aria-label="Previous month">‹</button><button data-act="mo-today">Today</button><button data-act="mo" data-d="1" aria-label="Next month">›</button></div><span class="spacer"></span><span class="muted small">Click a day to open its week</span></div><div class="month">`;
-  h += ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="mh">${d}</div>`).join('');
+  h += Array.from({ length: 7 }, (_, i) => DAYS[dow(addDays(start, i))]).map(d => `<div class="mh">${d}</div>`).join('');
   for (let i = 0; i < 42; i++) {
     const d = addDays(start, i), w = dow(d), items = apptsOn(d).sort((x, y) => (x.time || '') < (y.time || '') ? -1 : 1);
     const bl = blackoutLabel(d);
@@ -474,7 +476,7 @@ function viewConfirm() {
 function viewCustomers() {
   const q = S.q.trim().toLowerCase();
   let list = [...S.customers.values()].map(c => ({ c, st: customerState(c) }));
-  if (q) list = list.filter(({ c }) => [c.name, c.contact, c.email, c.phone, c.address, c.notes].some(v => String(v || '').toLowerCase().includes(q)));
+  if (q) list = list.filter(({ c }) => [c.name, c.custId, c.contact, c.email, c.phone, c.address, c.notes].some(v => String(v || '').toLowerCase().includes(q)));
   if (S.filter === 'visit') list = list.filter(x => (x.c.kind || 'visit') === 'visit');
   if (S.filter === 'touch') list = list.filter(x => isTouch(x.c.kind));
   if (S.filter === 'attn') list = list.filter(x => x.st.rank <= 3);
@@ -482,26 +484,28 @@ function viewCustomers() {
   else list.sort((a, b) => a.st.rank - b.st.rank || a.st.sortDate.localeCompare(b.st.sortDate) || custName(a.c).localeCompare(custName(b.c)));
   const ex = [...S.customers.values()].some(c => c.example);
   const attn = [...S.customers.values()].filter(c => customerState(c).rank <= 3).length;
-  return `<div class="toolbar"><h2>Customers</h2><input class="search" id="cust-q" type="search" placeholder="Search name, contact, city…" value="${esc(S.q)}" aria-label="Search customers">
+  return `<div class="toolbar"><h2>Customers</h2><input class="search" id="cust-q" type="search" placeholder="Search name, ID, contact, city…" value="${esc(S.q)}" aria-label="Search customers">
     <div class="seg">${[['all', 'All'], ['attn', `Needs attention${attn ? ' (' + attn + ')' : ''}`], ['visit', 'Visits'], ['touch', 'Calls & emails']].map(([k, l]) => `<button data-act="cfilter" data-f="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}</div>
     <span class="spacer"></span><button class="btn" data-act="import">Import</button><button class="btn" data-act="export-cust">Export</button><button class="btn primary" data-act="new-cust">+ Customer</button></div>
   ${ex ? `<div class="note warn row" style="margin-bottom:12px"><span style="flex:1;min-width:0">The customers marked “example” are sample data so you can see how things work. Delete them when you're ready to bring in your own.</span><button class="btn sm" data-act="clear-examples">Delete examples</button></div>` : ''}
   ${S.customers.size === 0 ? `<div class="panel" style="max-width:560px"><h3>No customers yet</h3><p class="muted" style="margin:0">Import a spreadsheet or CSV from your CRM, paste rows copied from Excel, or add customers one at a time. Everyone starts on a ${set().defaultCadence}-week cadence, and you can change any of them.</p><div class="row"><button class="btn primary" data-act="import">Import customers</button><button class="btn" data-act="new-cust">Add one</button></div></div>` : `
   <div class="tbl-wrap"><table><thead><tr><th><button class="linkbtn label" data-act="csort" data-s="name">Customer${S.sort === 'name' ? ' ↓' : ''}</button></th><th>Type</th><th>Cadence</th><th>Day</th><th>Last touch</th><th><button class="linkbtn label" data-act="csort" data-s="next">Next${S.sort === 'next' ? ' ↓' : ''}</button></th></tr></thead><tbody>
-  ${list.map(({ c, st }) => `<tr data-act="open-cust" data-id="${c.id}" class="${c.active === false ? 'paused' : ''}"><td><b>${esc(custName(c))}</b>${c.example ? ' <span class="pill">example</span>' : ''}<div class="sub">${esc([c.contact, c.address].filter(Boolean).join(' · '))}</div></td><td><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span></td><td>${cadenceLabel(c)}</td><td>${hasHome(c) ? DAYS[+c.homeDay] : '<span class="muted">—</span>'}</td><td>${c.lastTouch ? niceShort(c.lastTouch) : '<span class="muted">—</span>'}</td><td><span class="pill ${st.cls}">${st.text}</span></td></tr>`).join('')}
+  ${list.map(({ c, st }) => `<tr data-act="open-cust" data-id="${c.id}" class="${c.active === false ? 'paused' : ''}"><td><b>${esc(custName(c))}</b>${c.example ? ' <span class="pill">example</span>' : ''}<div class="sub">${esc([c.custId && '#' + c.custId, c.contact, c.address].filter(Boolean).join(' · '))}</div></td><td><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span></td><td>${cadenceLabel(c)}</td><td>${hasHome(c) ? DAYS[+c.homeDay] : '<span class="muted">—</span>'}</td><td>${c.lastTouch ? niceShort(c.lastTouch) : '<span class="muted">—</span>'}</td><td><span class="pill ${st.cls}">${st.text}</span></td></tr>`).join('')}
   </tbody></table>${list.length ? '' : '<div class="empty" style="padding:14px">No customers match.</div>'}</div>`}`;
 }
 
 /* ============ SETTINGS ============ */
 function viewSettings() {
   const s = set();
-  const dp = (name, arr) => `<div class="daypick">${[1, 2, 3, 4, 5, 6, 0].map(d => `<label><input type="checkbox" data-set-arr="${name}" value="${d}" ${arr.includes(d) ? 'checked' : ''}>${DAYS[d]}</label>`).join('')}</div>`;
+  const ws = +s.weekStart === 1 ? 1 : 0;
+  const dp = (name, arr) => `<div class="daypick">${Array.from({ length: 7 }, (_, i) => (i + ws) % 7).map(d => `<label><input type="checkbox" data-set-arr="${name}" value="${d}" ${arr.includes(d) ? 'checked' : ''}>${DAYS[d]}</label>`).join('')}</div>`;
   const bl = (s.blackouts || []).slice().sort((a, b) => a.start.localeCompare(b.start));
   const th = { ...DEFAULT_SETTINGS.theme, ...(s.theme || {}) };
   return `<div class="toolbar"><h2>Settings</h2><span class="spacer"></span><a class="btn" href="/admin">Admin: login, HTTPS, backups</a></div><div class="settings">
     <div class="panel"><h3>Appearance</h3>
       <div class="fld"><span>Light or dark</span><div class="seg">${[['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<button data-act="theme-mode" data-v="${k}" aria-pressed="${th.mode === k}">${l}</button>`).join('')}</div></div>
       <div class="fld"><span>Accent color</span><div class="swatches">${ACCENTS.map(([k, l, c]) => `<button class="swatch-btn" data-act="theme-accent" data-v="${k}" aria-pressed="${th.accent === k}" title="${l}" aria-label="${l}" style="background:${c}"></button>`).join('')}</div></div>
+      <div class="fld"><span>Calendar weeks start on</span><div class="seg">${[[0, 'Sunday'], [1, 'Monday']].map(([k, l]) => `<button data-act="week-start" data-v="${k}" aria-pressed="${ws === k}">${l}</button>`).join('')}</div></div>
       <p class="muted small" style="margin:0">Saved to your account, so your phone and computer match.</p>
     </div>
     <div class="panel"><h3>Your week</h3>
@@ -716,6 +720,7 @@ function customerDialog(c) {
     <div class="dlg-b">
       <div class="form">
         <label class="fld full"><span>Account / customer name</span><input id="cd-name" value="${esc(c.name)}" autofocus></label>
+        <label class="fld"><span>Customer ID</span><input id="cd-custid" value="${esc(c.custId)}"></label>
         <label class="fld"><span>Contact person</span><input id="cd-contact" value="${esc(c.contact)}"></label>
         <label class="fld"><span>Phone</span><input id="cd-phone" type="tel" value="${esc(c.phone)}"></label>
         <label class="fld"><span>Email</span><input id="cd-email" type="email" value="${esc(c.email)}"></label>
@@ -736,7 +741,7 @@ function customerDialog(c) {
     (el, close) => {
       const g = id => el.querySelector(id);
       const read = () => ({
-        name: g('#cd-name').value.trim(), contact: g('#cd-contact').value.trim(), phone: g('#cd-phone').value.trim(), email: g('#cd-email').value.trim(), address: g('#cd-address').value.trim(),
+        name: g('#cd-name').value.trim(), custId: g('#cd-custid').value.trim(), contact: g('#cd-contact').value.trim(), phone: g('#cd-phone').value.trim(), email: g('#cd-email').value.trim(), address: g('#cd-address').value.trim(),
         kind: g('#cd-kind').value, cadence: Math.max(1, +g('#cd-cad').value || 3), unit: g('#cd-unit').value, homeDay: g('#cd-home').value === '' ? '' : +g('#cd-home').value,
         preferredTime: g('#cd-time').value, duration: +g('#cd-dur').value || set().visitLength, rhythmDate: g('#cd-rhythm').value, notes: g('#cd-notes').value, active: g('#cd-active').checked,
       });
@@ -816,7 +821,7 @@ function offerFile(filename, text, type = 'text/csv') {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }
 function exportWeek() {
-  const ws = mondayOf(S.anchor), we = addDays(ws, 6);
+  const ws = weekStartOf(S.anchor), we = addDays(ws, 6);
   const rows = [...S.appts.values()].filter(a => a.date >= ws && a.date <= we && isOpen(a)).sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
   if (!rows.length) { toast('Nothing open to export that week.'); return; }
   const head = ['Subject', 'Start Date', 'Start Time', 'End Date', 'End Time', 'All Day Event', 'Description', 'Location'];
@@ -829,13 +834,14 @@ function exportWeek() {
   offerFile(`cadence-week-${ws}.csv`, lines.join('\r\n'));
 }
 function exportCustomers() {
-  const head = ['Name', 'Contact', 'Phone', 'Email', 'Address', 'Type', 'Cadence', 'Unit', 'Day', 'Preferred time', 'Last touch', 'Last on-rhythm date', 'Next due', 'Active', 'Notes'];
-  const lines = [head.join(',')].concat([...S.customers.values()].sort((a, b) => custName(a).localeCompare(custName(b))).map(c => [c.name, c.contact, c.phone, c.email, c.address, KINDS[c.kind || 'visit'], c.cadence, c.unit || 'weeks', hasHome(c) ? DAYS_LONG[+c.homeDay] : '', c.preferredTime, c.lastTouch, c.rhythmDate, dueDate(c) || '', c.active === false ? 'No' : 'Yes', c.notes].map(csvCell).join(',')));
+  const head = ['Name', 'Customer ID', 'Contact', 'Phone', 'Email', 'Address', 'Type', 'Cadence', 'Unit', 'Day', 'Preferred time', 'Last touch', 'Last on-rhythm date', 'Next due', 'Active', 'Notes'];
+  const lines = [head.join(',')].concat([...S.customers.values()].sort((a, b) => custName(a).localeCompare(custName(b))).map(c => [c.name, c.custId, c.contact, c.phone, c.email, c.address, KINDS[c.kind || 'visit'], c.cadence, c.unit || 'weeks', hasHome(c) ? DAYS_LONG[+c.homeDay] : '', c.preferredTime, c.lastTouch, c.rhythmDate, dueDate(c) || '', c.active === false ? 'No' : 'Yes', c.notes].map(csvCell).join(',')));
   offerFile(`customers-${today()}.csv`, lines.join('\r\n'));
 }
 
 /* ============ import ============ */
 const IMPORT_FIELDS = [
+  ['custId', 'Customer ID', ['customer id', 'cust id', 'customer #', 'cust #', 'customer number', 'customer no', 'account id', 'account number', 'account #', 'acct', 'id']],
   ['email', 'Email', ['email', 'e-mail']],
   ['phone', 'Phone', ['phone', 'mobile', 'cell', 'tel']],
   ['contact', 'Contact person', ['contact', 'first name', 'person', 'buyer', 'owner']],
@@ -868,7 +874,7 @@ function guessMap(headers) {
   for (const [f, , keys] of IMPORT_FIELDS) {
     let idx = -1;
     for (const k of keys) { idx = headers.findIndex((h, i) => !used.has(i) && String(h).toLowerCase().trim() === k); if (idx >= 0) break; }
-    if (idx < 0) for (const k of keys) { idx = headers.findIndex((h, i) => !used.has(i) && String(h).toLowerCase().includes(k)); if (idx >= 0) break; }
+    if (idx < 0) for (const k of keys.filter(k => k.length > 2)) { idx = headers.findIndex((h, i) => !used.has(i) && String(h).toLowerCase().includes(k)); if (idx >= 0) break; }
     if (idx >= 0) { map[f] = idx; used.add(idx); } else map[f] = -1;
   }
   return map;
@@ -916,7 +922,7 @@ function importDialog() {
           <div class="tbl-wrap"><table class="maptbl"><tbody>${IMPORT_FIELDS.slice().sort((a, b) => a[0] === 'name' ? -1 : b[0] === 'name' ? 1 : 0).map(([f, l]) => `<tr><td>${l}</td><td>${sel(f)}</td></tr>`).join('')}</tbody></table></div>
           <div class="form"><label class="fld"><span>If no type is given, use</span><select id="im-dk">${Object.entries(KINDS).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
           <label class="fld"><span>If no cadence is given, use</span><div class="inline"><input type="number" id="im-dc" min="1" value="${set().defaultCadence}" style="width:80px"><select id="im-du"><option value="weeks">weeks</option><option value="days" ${set().defaultUnit === 'days' ? 'selected' : ''}>days</option></select></div></label>
-          <label class="cb full"><input type="checkbox" id="im-up" checked><span>If a customer with the same name already exists, update it instead of adding a duplicate</span></label></div>
+          <label class="cb full"><input type="checkbox" id="im-up" checked><span>If a customer with the same ID or name already exists, update it instead of adding a duplicate</span></label></div>
           <div class="label">Preview</div><div class="prev" id="im-prev"></div>`;
         g('#im-map').querySelectorAll('[data-map]').forEach(s => s.onchange = () => { map[s.dataset.map] = +s.value; preview(); });
         ['#im-dk', '#im-dc', '#im-du'].forEach(id => g(id).onchange = preview);
@@ -931,13 +937,13 @@ function importDialog() {
           const last = normDate(val(r, 'lastTouch'));
           let home = normDay(val(r, 'homeDay'));
           if (home === '' && last && cad.unit === 'weeks') { const w = dow(last); if (w >= 1 && w <= 5) home = w; }
-          return { name, contact: val(r, 'contact') !== name ? val(r, 'contact') : '', phone: val(r, 'phone'), email: val(r, 'email'), address: val(r, 'address'), kind: normKind(val(r, 'kind')) || dk, ...cad, homeDay: home, lastTouch: last, rhythmDate: last, notes: val(r, 'notes') };
+          return { name, custId: val(r, 'custId'), contact: val(r, 'contact') !== name ? val(r, 'contact') : '', phone: val(r, 'phone'), email: val(r, 'email'), address: val(r, 'address'), kind: normKind(val(r, 'kind')) || dk, ...cad, homeDay: home, lastTouch: last, rhythmDate: last, notes: val(r, 'notes') };
         }).filter(Boolean);
       }
       function preview() {
         if (map.name < 0 && map.contact < 0) { g('#im-prev').innerHTML = '<div class="empty" style="padding:8px">Pick which column holds the customer name.</div>'; g('#im-go').disabled = true; g('#im-count').textContent = ''; return; }
         const b = build();
-        g('#im-prev').innerHTML = `<table><thead><tr><th>Name</th><th>Contact</th><th>Type</th><th>Cadence</th><th>Day</th><th>Last visit</th></tr></thead><tbody>${b.slice(0, 6).map(c => `<tr><td>${esc(c.name)}</td><td>${esc(c.contact)}</td><td>${KINDS[c.kind]}</td><td>${cadenceLabel(c)}</td><td>${c.homeDay !== '' ? DAYS[c.homeDay] : '—'}</td><td>${c.lastTouch ? niceShort(c.lastTouch) : '—'}</td></tr>`).join('')}</tbody></table>`;
+        g('#im-prev').innerHTML = `<table><thead><tr><th>Name</th><th>ID</th><th>Contact</th><th>Type</th><th>Cadence</th><th>Day</th><th>Last visit</th></tr></thead><tbody>${b.slice(0, 6).map(c => `<tr><td>${esc(c.name)}</td><td>${esc(c.custId)}</td><td>${esc(c.contact)}</td><td>${KINDS[c.kind]}</td><td>${cadenceLabel(c)}</td><td>${c.homeDay !== '' ? DAYS[c.homeDay] : '—'}</td><td>${c.lastTouch ? niceShort(c.lastTouch) : '—'}</td></tr>`).join('')}</tbody></table>`;
         g('#im-count').textContent = `${b.length} customer${b.length === 1 ? '' : 's'} ready`;
         g('#im-go').disabled = !b.length;
       }
@@ -945,10 +951,11 @@ function importDialog() {
         if (!needDb()) return;
         const b = build(), upd = g('#im-up').checked;
         const byName = new Map([...S.customers.values()].map(c => [custName(c).toLowerCase(), c]));
+        const byId = new Map([...S.customers.values()].filter(c => c.custId).map(c => [String(c.custId).toLowerCase(), c]));
         g('#im-go').disabled = true;
         let added = 0, updated = 0, failed = 0, i = 0;
         const jobs = b.map(c => async () => {
-          const ex = upd ? byName.get(c.name.toLowerCase()) : null;
+          const ex = upd ? (c.custId && byId.get(c.custId.toLowerCase())) || byName.get(c.name.toLowerCase()) : null;
           try {
             if (ex) { const patch = {}; for (const [k, v] of Object.entries(c)) if (v !== '' && v != null) patch[k] = v; await cRef(ex.id).update(patch); updated++; }
             else { await cRef(uid()).set({ ...c, preferredTime: '', duration: set().visitLength, active: true, createdAt: Date.now() }); added++; }
@@ -983,9 +990,9 @@ $('#main').addEventListener('click', async e => {
   const act = t.dataset.act, id = t.dataset.id;
   const a = id ? S.appts.get(id) : null;
   switch (act) {
-    case 'wk': S.anchor = addDays(mondayOf(S.anchor), +t.dataset.d); render(); break;
+    case 'wk': S.anchor = addDays(weekStartOf(S.anchor), +t.dataset.d); render(); break;
     case 'wk-this': S.anchor = today(); render(); break;
-    case 'wk-next': S.anchor = addDays(mondayOf(today()), 7); render(); break;
+    case 'wk-next': S.anchor = addDays(weekStartOf(today()), 7); render(); break;
     case 'mo': { const d = toD(S.monthAnchor); S.monthAnchor = fmt(new Date(d.getFullYear(), d.getMonth() + +t.dataset.d, 1, 12)); render(); break; }
     case 'mo-today': S.monthAnchor = today(); render(); break;
     case 'mo-day': S.anchor = t.dataset.date; S.view = 'week'; render(); break;
@@ -1004,6 +1011,7 @@ $('#main').addEventListener('click', async e => {
     case 'copy-confirm': if (a) copyText(fill(set().confirmTemplate, a), 'Message copied.'); break;
     case 'export-week': exportWeek(); break;
     case 'theme-mode': await saveSettings({ theme: { ...DEFAULT_SETTINGS.theme, ...(set().theme || {}), mode: t.dataset.v } }); applyTheme(); render(); break;
+    case 'week-start': await saveSettings({ weekStart: +t.dataset.v }); render(); break;
     case 'theme-accent': await saveSettings({ theme: { ...DEFAULT_SETTINGS.theme, ...(set().theme || {}), accent: t.dataset.v } }); applyTheme(); render(); break;
     case 'export-cust': exportCustomers(); break;
     case 'open-cust': { const c = S.customers.get(id); if (c) customerDialog(c); break; }
