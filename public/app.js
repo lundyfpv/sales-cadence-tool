@@ -62,9 +62,11 @@ const lines = s => String(s || '').split('\n').map(l => l.trim().replace(/^[-•
 // A missed or cancelled meeting with no items of its own doesn't clear the ones from before it.
 function actionItems(a) {
   const prev = [...S.appts.values()].filter(x => x.customerId === a.customerId && x.id !== a.id && !isOpen(x) && x.date <= a.date && (x.status === 'completed' || lines(x.actions).length)).sort((x, y) => y.date.localeCompare(x.date))[0];
-  return [...(prev ? lines(prev.actions).map(t => ({ t, from: prev })) : []), ...lines(a.actions).map(t => ({ t, from: a }))];
+  const mk = from => lines(from.actions).map(t => ({ t, from, done: (from.actionsDone || []).includes(t) }));
+  return [...(prev ? mk(prev) : []), ...mk(a)];
 }
-const taskList = items => items.length ? `<ul class="tasks">${items.map(i => `<li>${esc(i.t)}</li>`).join('')}</ul>` : '';
+// Done items are stored by their text on the appointment they were written on (actionsDone). Pass live = false where there's no click handler.
+const taskList = (items, live = true) => items.length ? `<ul class="tasks">${items.map(i => `<li class="${i.done ? 'done' : ''}">${live ? `<label><input type="checkbox" data-act="task-toggle" data-id="${i.from.id}" data-t="${esc(i.t)}" ${i.done ? 'checked' : ''}><span>${esc(i.t)}</span></label>` : `<span>${esc(i.t)}</span>`}</li>`).join('')}</ul>` : '';
 
 /* ============ cadence engine ============ */
 function isBlackout(s) { return (set().blackouts || []).some(b => s >= b.start && s <= (b.end || b.start)); }
@@ -416,7 +418,7 @@ function viewPlan() {
     .concat([...S.customers.values()].filter(c => c.active !== false && !openApptFor(c.id)).map(c => ({ c, date: dueDate(c) })).filter(x => x.date && x.date > we && x.date <= farEnd)
       .map(x => ({ ...x, items: actionItems({ customerId: x.c.id, id: '', date: x.date }) })))
     .filter(x => x.items.length).sort(byWhen);
-  const taskCount = upcoming.reduce((n, a) => n + actionItems(a).length, 0);
+  const taskCount = upcoming.reduce((n, a) => n + actionItems(a).filter(i => !i.done).length, 0);
   const candRows = cands.map(({ c, due, day }) => {
     const st = !due ? '<span class="pill warn">Never touched</span>' : due < ws ? `<span class="pill bad">Overdue since ${niceShort(due)}</span>` : `<span class="pill">Due ${nice(due)}</span>`;
     const opts = days.concat(addDays(ws, 5), addDays(ws, 6)).filter(d => d >= (ws < t ? t : ws)).map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${DAYS[dow(d)]} ${niceShort(d)}${!allowedDay(d, c.kind) ? ' (office)' : ''}</option>`).join('');
@@ -644,7 +646,7 @@ function apptDialog(a, preset = {}) {
         <div class="fld"><span>Their rhythm</span><div class="small muted" id="ad-r" style="padding-top:6px"></div></div>
         <label class="fld full"><span>Agenda / prep notes</span><textarea id="ad-n" placeholder="What you plan to cover…">${esc(a?.notes || '')}</textarea></label>
         <label class="fld full"><span>Recap <span class="muted">(after the meeting; one point per line becomes a bullet in your Friday email)</span></span><textarea id="ad-rc" rows="5" placeholder="Reviewed Q4 order&#10;Wants pricing on bulk pallets&#10;Follow up with samples">${esc(a?.recap || '')}</textarea></label>
-        ${prevTasks.length ? `<div class="note full"><div class="label" style="margin-bottom:4px">My action items from the ${KINDS[prevTasks[0].from.kind].toLowerCase()} on ${nice(prevTasks[0].from.date)}</div>${taskList(prevTasks)}</div>` : ''}
+        ${prevTasks.length ? `<div class="note full"><div class="label" style="margin-bottom:4px">My action items from the ${KINDS[prevTasks[0].from.kind].toLowerCase()} on ${nice(prevTasks[0].from.date)}</div>${taskList(prevTasks, false)}</div>` : ''}
         <label class="fld full"><span>My action items <span class="muted">(what you'll do for them before the next meeting; one per line)</span></span><textarea id="ad-ai" rows="3" placeholder="e.g. Send bulk pallet pricing">${esc(a?.actions || '')}</textarea></label>
       </div>
       <div id="ad-w"></div>
@@ -677,7 +679,7 @@ function apptDialog(a, preset = {}) {
           return;
         }
         close();
-        const base = { kind: k, duration: dur, notes, recap, actions, customerId: cid2 };
+        const base = { kind: k, duration: dur, notes, recap, actions, actionsDone: (a.actionsDone || []).filter(x => lines(actions).includes(x)), customerId: cid2 };
         if (st !== a.status && ['completed', 'missed', 'cancelled'].includes(st) && isOpen(a)) {
           await guard(aRef(a.id).update({ ...base, date: d, time: t }));
           await setOutcome({ ...a, ...base, date: d, time: t }, st, { notes, recap, actions });
@@ -1037,6 +1039,10 @@ $('#main').addEventListener('click', async e => {
     case 'quick-done': if (a) { await setOutcome(a, 'completed'); render(); } break;
     case 'confirm': if (a && needDb()) { await guard(aRef(a.id).update({ status: 'confirmed' }), 'Confirmed.'); } break;
     case 'unconfirm': if (a && needDb()) { await guard(aRef(a.id).update({ status: 'proposed' })); } break;
+    case 'task-toggle': if (a && needDb()) {
+      const done = new Set(a.actionsDone || []); if (t.checked) done.add(t.dataset.t); else done.delete(t.dataset.t);
+      a.actionsDone = [...done]; render(); await guard(aRef(a.id).update({ actionsDone: a.actionsDone }));
+    } break;
     case 'recap-toggle': if (a && needDb()) await guard(aRef(a.id).update({ recapSent: !a.recapSent })); break;
     case 'copy-recap': if (a) copyText(fill(set().recapTemplate, a), 'Recap copied. Paste it into your email.'); break;
     case 'copy-confirm': if (a) copyText(fill(set().confirmTemplate, a), 'Message copied.'); break;

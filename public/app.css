@@ -300,6 +300,10 @@ a.btn.primary { color: var(--accent-ink); }
 .colhead.plan { border-color: var(--accent); }
 .colhead.recap { border-color: var(--muted); }
 .li.start { align-items: flex-start; }
-.tasks { margin: 4px 0 0; padding-left: 18px; font-size: .88rem; }
+.tasks { margin: 4px 0 0; padding: 0; list-style: none; font-size: .88rem; }
 .tasks li { margin: 2px 0; }
+.tasks label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.tasks input { margin: 3px 0 0; flex: none; accent-color: var(--accent); }
+.tasks li:not(:has(label))::before { content: "•"; margin-right: 8px; color: var(--muted); }
+.tasks li.done span { text-decoration: line-through; color: var(--muted); }
 .card .tasks { margin: 0; }
