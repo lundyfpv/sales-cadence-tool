@@ -302,7 +302,7 @@ function viewWeek() {
   const thisW = weekStartOf(t), nextW = addDays(thisW, 7);
   const label = `${toD(days[0]).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${toD(days[days.length - 1]).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
   const tb = `<div class="toolbar">
-    <h2>${ws === thisW ? 'This week' : ws === nextW ? 'Next week' : 'Week of ' + niceShort(ws)}</h2>
+    <h2 class="wtitle">${ws === thisW ? 'This week' : ws === nextW ? 'Next week' : 'Week of ' + niceShort(ws)}</h2>
     <div class="seg"><button data-act="wk" data-d="-7" aria-label="Previous week">‹</button><button data-act="wk-this" aria-pressed="${ws === thisW}">This week</button><button data-act="wk-next" aria-pressed="${ws === nextW}">Next week</button><button data-act="wk" data-d="7" aria-label="Following week">›</button></div>
     <span class="muted small">${label}</span><span class="spacer"></span>
     <button class="btn" data-act="export-week">Export to calendar</button>
@@ -330,7 +330,7 @@ function weekGrid(days) {
   h += `<div class="corner" style="font-size:.7rem;color:var(--muted);padding:6px 4px;text-align:right;border-bottom:1px solid var(--line)">All day</div>`;
   for (const d of days) {
     const w = dow(d), items = apptsOn(d).filter(a => !a.time).sort((a, b) => apptName(a).localeCompare(apptName(b)));
-    h += `<div class="allday ${set().officeDays.includes(w) ? 'office' : ''} ${isBlackout(d) ? 'blk' : ''}" data-allday="${d}">${items.map(a => chip(a)).join('')}</div>`;
+    h += `<div class="allday ${set().officeDays.includes(w) ? 'office' : ''} ${isBlackout(d) ? 'blk' : ''} ${d === t ? 'today' : ''}" data-allday="${d}">${items.map(a => chip(a)).join('')}</div>`;
   }
   h += `<div class="hours" style="height:${(ge - gs) * PX}px">${Array.from({ length: ge - gs }, (_, i) => i ? `<span style="top:${i * PX}px">${t12s(pad(gs + i) + ':00')}</span>` : '').join('')}</div>`;
   for (const d of days) {
@@ -341,7 +341,7 @@ function weekGrid(days) {
     const flush = () => { const lanes = []; for (const ev of cluster) { let li = lanes.findIndex(end => end <= ev.s); if (li < 0) { li = lanes.length; lanes.push(0); } lanes[li] = ev.e; ev.lane = li; } for (const ev of cluster) { ev.n = lanes.length; out.push(ev); } cluster = []; };
     for (const ev of evs) { if (ev.s >= cEnd && cluster.length) flush(); cluster.push(ev); cEnd = Math.max(cEnd, ev.e); }
     flush();
-    let col = `<div class="col ${set().officeDays.includes(w) ? 'office' : ''} ${isBlackout(d) ? 'blk' : ''}" data-col="${d}" style="height:${(ge - gs) * PX}px">`;
+    let col = `<div class="col ${set().officeDays.includes(w) ? 'office' : ''} ${isBlackout(d) ? 'blk' : ''} ${d === t ? 'today' : ''}" data-col="${d}" style="height:${(ge - gs) * PX}px">`;
     if (d === t) { const now = new Date(); const m = now.getHours() * 60 + now.getMinutes(); if (m >= gs * 60 && m <= ge * 60) col += `<div class="nowline" style="top:${(m - gs * 60) / 60 * PX}px"></div>`; }
     for (const { a, s, e, lane, n } of out) {
       const top = Math.max(0, (s - gs * 60) / 60 * PX), ht = Math.max(22, (e - s) / 60 * PX - 2);
@@ -357,7 +357,7 @@ function agenda(days) {
     const w = dow(d), office = set().officeDays.includes(w), bl = blackoutLabel(d);
     const items = apptsOn(d).sort((a, b) => (a.time || '00') < (b.time || '00') ? -1 : 1);
     const nv = visitsOn(d).length;
-    return `<section class="aday ${office ? 'office' : ''}"><div class="aday-h"><span class="dnum">${toD(d).getDate()}</span><b>${DAYS_LONG[w]}</b><span class="muted small">${office ? 'Office day' : nv + ' visit' + (nv === 1 ? '' : 's')}</span>${bl ? `<span class="pill bad">${esc(bl)}</span>` : ''}${nv > set().maxVisitsPerDay ? '<span class="pill bad">Over limit</span>' : ''}<span class="spacer"></span><button class="btn sm ghost" data-act="new-appt" data-date="${d}" aria-label="Add on ${nice(d)}">+</button></div>
+    return `<section class="aday ${office ? 'office' : ''} ${d === today() ? 'today' : ''}"><div class="aday-h"><span class="dnum">${toD(d).getDate()}</span><b>${DAYS_LONG[w]}</b><span class="muted small">${office ? 'Office day' : nv + ' visit' + (nv === 1 ? '' : 's')}</span>${bl ? `<span class="pill bad">${esc(bl)}</span>` : ''}${nv > set().maxVisitsPerDay ? '<span class="pill bad">Over limit</span>' : ''}<span class="spacer"></span><button class="btn sm ghost" data-act="new-appt" data-date="${d}" aria-label="Add on ${nice(d)}">+</button></div>
       ${items.length ? items.map(a => `<button class="aitem" data-act="open-appt" data-id="${a.id}"><span class="tm">${a.time ? t12(a.time) : 'Any time'}</span><span class="swatch ${evClass(a)}"></span><span class="grow"><b>${esc(apptName(a))}</b><br><span class="muted small">${KINDS[a.kind]} · ${a.status}</span></span></button>`).join('') : `<div class="aitem muted small" style="cursor:default">Nothing scheduled</div>`}
     </section>`;
   }).join('')}</div>`;
@@ -384,7 +384,7 @@ function weekSide(ws, days) {
 function viewMonth() {
   const a = toD(S.monthAnchor), first = fmt(new Date(a.getFullYear(), a.getMonth(), 1, 12));
   const start = weekStartOf(first), t = today(), m = a.getMonth();
-  let h = `<div class="toolbar"><h2>${a.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h2><div class="seg"><button data-act="mo" data-d="-1" aria-label="Previous month">‹</button><button data-act="mo-today">Today</button><button data-act="mo" data-d="1" aria-label="Next month">›</button></div><span class="spacer"></span><span class="muted small">Click a day to open its week</span></div><div class="month">`;
+  let h = `<div class="toolbar"><h2 class="mtitle">${a.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h2><div class="seg"><button data-act="mo" data-d="-1" aria-label="Previous month">‹</button><button data-act="mo-today">Today</button><button data-act="mo" data-d="1" aria-label="Next month">›</button></div><span class="spacer"></span><span class="muted small">Click a day to open its week</span></div><div class="month">`;
   h += Array.from({ length: 7 }, (_, i) => DAYS[dow(addDays(start, i))]).map(d => `<div class="mh">${d}</div>`).join('');
   for (let i = 0; i < 42; i++) {
     const d = addDays(start, i), w = dow(d), items = apptsOn(d).sort((x, y) => (x.time || '') < (y.time || '') ? -1 : 1);
