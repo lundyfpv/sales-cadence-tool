@@ -2,6 +2,7 @@
   "name": "Sales Cadence Tool",
   "short_name": "Cadence",
   "description": "Customer visit and call cadence planner",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
