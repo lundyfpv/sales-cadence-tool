@@ -315,7 +315,7 @@ function viewWeek() {
 function legend() {
   return `<div class="legend"><span><i class="g-assigned"></i>Assigned account</span><span><i class="g-open"></i>Not assigned</span><span><i class="g-prospect"></i>Prospect</span><span><i class="g-open s-proposed"></i>Proposed</span><span><i style="background:var(--surface-2)"></i>Done</span><span><i style="background:var(--red-soft)"></i>Missed</span><span><i style="background:var(--office)"></i>Office day</span><span class="spacer"></span><span>Drag to move · click an empty slot to add</span></div>`;
 }
-const PX = 48;
+const PX = 44;
 function weekGrid(days) {
   const gs = +set().gridStart || 7, ge = +set().gridEnd || 18, t = today();
   const cols = `56px repeat(${days.length}, minmax(0,1fr))`;
