@@ -544,7 +544,7 @@ function viewSettings() {
   const th = { ...DEFAULT_SETTINGS.theme, ...(s.theme || {}) };
   return `<div class="toolbar"><h2>Settings</h2><span class="spacer"></span><a class="btn" href="/admin">Admin: login, HTTPS, backups</a></div><div class="settings">
     <div class="panel"><h3>Appearance</h3>
-      <div class="fld"><span>Light or dark</span><div class="seg">${[['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<button data-act="theme-mode" data-v="${k}" aria-pressed="${th.mode === k}">${l}</button>`).join('')}</div></div>
+      <div class="fld"><span>Theme</span><div class="seg">${[['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark'], ['oled', 'OLED black']].map(([k, l]) => `<button data-act="theme-mode" data-v="${k}" aria-pressed="${th.mode === k}">${l}</button>`).join('')}</div></div>
       <div class="fld"><span>Accent color</span><div class="swatches">${ACCENTS.map(([k, l, c]) => `<button class="swatch-btn" data-act="theme-accent" data-v="${k}" aria-pressed="${th.accent === k}" title="${l}" aria-label="${l}" style="background:${c}"></button>`).join('')}</div></div>
       <div class="fld"><span>Calendar weeks start on</span><div class="seg">${[[0, 'Sunday'], [1, 'Monday']].map(([k, l]) => `<button data-act="week-start" data-v="${k}" aria-pressed="${ws === k}">${l}</button>`).join('')}</div></div>
       <p class="muted small" style="margin:0">Saved to your account, so your phone and computer match.</p>
@@ -1220,7 +1220,7 @@ menuBtn.onclick = e => { e.stopPropagation(); menuPop.hidden = !menuPop.hidden; 
 document.addEventListener('click', e => { if (!menuPop.hidden && !menuPop.contains(e.target)) { menuPop.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); } });
 $('#menu-theme').onclick = async () => {
   const th = { ...DEFAULT_SETTINGS.theme, ...(set().theme || {}) };
-  const dark = th.mode === 'dark' || (th.mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+  const dark = th.mode === 'dark' || th.mode === 'oled' || (th.mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   await saveSettings({ theme: { ...th, mode: dark ? 'light' : 'dark' } }); applyTheme(); render();
 };
 $('#menu-out').onclick = async () => { try { await api('POST', '/api/logout'); } catch (e) {} location.href = '/login'; };

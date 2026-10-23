@@ -336,3 +336,12 @@ a.btn.primary { color: var(--accent-ink); }
 .aday.today .aday-h { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
 .aday.today .aday-h .dnum { background: var(--accent); color: var(--accent-ink); border-radius: 6px; padding: 0 6px; }
 @media (max-width: 760px) { .mc.today .n::after { display: none; } }
+
+/* OLED black: the dark theme on true black, which saves power and looks deeper on OLED phone screens */
+:root[data-theme="oled"] {
+  --bg: #000000; --surface: #000000; --surface-2: #161616; --ink: #e6e6e6; --muted: #9a9a9a; --line: #2a2a2a;
+  --amber: #e3ab52; --amber-soft: #2e230f; --red: #ef7d74; --red-soft: #33181a; --touch: #b9a3e3; --touch-soft: #221c33; --office: #0f0e0b;
+  --accent: var(--acc-d); --accent-soft: var(--accs-d); --accent-ink: #000000; --shadow: 0 8px 30px rgba(0,0,0,.8);
+  --g-open: #86acf2; --g-open-soft: #15213a; --g-assigned: #6fcf98; --g-assigned-soft: #102a1e; --g-prospect: #f2cb4f; --g-prospect-soft: #30280b;
+  color-scheme: dark;
+}
