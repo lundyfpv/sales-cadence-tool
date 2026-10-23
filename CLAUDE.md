@@ -27,9 +27,10 @@ Alec, a field sales rep, uses it alone. He sees customers on a cadence (usually 
 - `public/admin.*`, `public/login.*`: the admin and login pages. `theme.js` applies light/dark mode and the accent color before first paint.
 
 ## Data model
-- **customers**: name, custId (the customer's own ID, free text), contact, phone, email, address, kind (visit|call|email|text), cadence, unit (weeks|days), homeDay (0–6 or ''), preferredTime, duration, active, notes, lastTouch, rhythmDate.
+- **customers**: name, custId (the customer's own ID, free text), prospect (bool), prospectSince (date it became a prospect), assigned (bool, assigned account), products (array of category names they currently buy), competitor (competitor equipment brand), contact, phone, email, address, kind (visit|call|email|text), cadence, unit (weeks|days), homeDay (0–6 or ''), preferredTime, duration, active, notes, lastTouch, rhythmDate.
 - **appointments**: customerId, name, kind, date (YYYY-MM-DD), time (HH:MM or '' = all day), duration, status (proposed|confirmed|completed|missed|cancelled), rhythmDate, notes (agenda), recap, actions ("My action items": the rep's to-dos before the next meeting, one per line; an upcoming appointment shows its own plus those from the customer's last meeting), actionsDone (texts of the items ticked off), recapSent.
-- **config/settings**: visitDays, officeDays, dayStart/End, visitLength, buffer, maxVisitsPerDay, default cadence, autoNext, blackouts[], message templates, theme {mode, accent}, weekStart (0 = Sunday, the default; 1 = Monday; only affects the Week and Month calendars).
+- **config/settings**: visitDays, officeDays, dayStart/End, visitLength, buffer, maxVisitsPerDay, default cadence, autoNext, blackouts[], message templates, theme {mode, accent}, weekStart (0 = Sunday, the default; 1 = Monday; only affects the Week and Month calendars), prospectCadence (weeks, default 2), coldAfter (follow-ups before a prospect shows "Going cold", default 4), productCategories[], competitors[] (names offered as you type).
+- **Calendar colors** come from the customer, not the appointment type: prospects yellow, assigned accounts green, everyone else blue. Status still overrides (proposed is dashed, done is grey, missed is red).
 
 ## Cadence rules (agreed with Alec; don't change them without asking)
 - The next due date is counted from the appointment's **rhythmDate** (its original slot), not from the day it actually happened.
