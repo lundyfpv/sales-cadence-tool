@@ -49,7 +49,7 @@ const S = {
   view: 'week', anchor: today(), monthAnchor: today(), planWeek: null, confirmWeek: null,
   q: '', filter: 'all', sort: 'next', loaded: { c: false, a: false, s: false }, mobile: false, fileCounts: {}, user: null,
 };
-const VIEWS = [['week', 'Week'], ['month', 'Month'], ['plan', 'Plan', 'Fri'], ['confirm', 'Confirm', 'Mon'], ['customers', 'Customers'], ['settings', 'Settings']];
+const VIEWS = [['week', 'Week'], ['month', 'Month'], ['plan', 'Recap and Plan', 'Fri'], ['confirm', 'Confirm', 'Mon'], ['customers', 'Customers'], ['settings', 'Settings']];
 try { const v = localStorage.getItem('cb.view'); if (v && VIEWS.some(x => x[0] === v)) S.view = v; } catch (e) {}
 
 const set = () => S.settings;
@@ -57,6 +57,14 @@ const custName = c => c ? (c.name || c.contact || 'Unnamed') : 'Removed customer
 const apptName = a => { const c = S.customers.get(a.customerId); return c ? custName(c) : (a.name || 'Removed customer'); };
 const isOpen = a => a.status === 'proposed' || a.status === 'confirmed';
 const firstName = c => (c?.contact || c?.name || '').trim().split(/\s+/)[0] || 'there';
+const lines = s => String(s || '').split('\n').map(l => l.trim().replace(/^[-•*]\s*/, '')).filter(Boolean);
+// My action items for an upcoming appointment: those logged at the customer's last meeting before it, plus any added to it directly.
+// A missed or cancelled meeting with no items of its own doesn't clear the ones from before it.
+function actionItems(a) {
+  const prev = [...S.appts.values()].filter(x => x.customerId === a.customerId && x.id !== a.id && !isOpen(x) && x.date <= a.date && (x.status === 'completed' || lines(x.actions).length)).sort((x, y) => y.date.localeCompare(x.date))[0];
+  return [...(prev ? lines(prev.actions).map(t => ({ t, from: prev })) : []), ...lines(a.actions).map(t => ({ t, from: a }))];
+}
+const taskList = items => items.length ? `<ul class="tasks">${items.map(i => `<li>${esc(i.t)}</li>`).join('')}</ul>` : '';
 
 /* ============ cadence engine ============ */
 function isBlackout(s) { return (set().blackouts || []).some(b => s >= b.start && s <= (b.end || b.start)); }
@@ -155,7 +163,7 @@ async function createAppt(o) {
   const doc = {
     customerId: o.customerId, name: c ? custName(c) : '', kind, date: o.date, time: o.time || '',
     duration: +(o.duration || c?.duration || set().visitLength), status: o.status || 'proposed',
-    rhythmDate: o.rhythmDate || o.date, notes: o.notes || '', recap: o.recap || '', recapSent: false, createdAt: Date.now(),
+    rhythmDate: o.rhythmDate || o.date, notes: o.notes || '', recap: o.recap || '', actions: o.actions || '', recapSent: false, createdAt: Date.now(),
   };
   if (c?.example) doc.example = true;
   const id = uid();
@@ -178,6 +186,7 @@ async function setOutcome(a, status, o = {}) {
   const patch = { status, outcomeAt: Date.now() };
   if (o.notes !== undefined) patch.notes = o.notes;
   if (o.recap !== undefined) patch.recap = o.recap;
+  if (o.actions !== undefined) patch.actions = o.actions;
   if (!await guard(aRef(a.id).update(patch))) return;
   const c = S.customers.get(a.customerId);
   if (!c) { toast('Saved.'); return; }
@@ -354,7 +363,7 @@ function weekSide(ws, days) {
       }).join('') : '<div class="empty">No calls or emails due this week.</div>'}</div></div>
     ${stale.length ? `<div class="panel"><div class="row"><h3>Needs an outcome</h3><span class="spacer"></span><span class="pill bad">${stale.length}</span></div><p class="muted small" style="margin:0">These dates have passed but weren't marked done or missed. Until you log them, the next one won't be scheduled.</p>
       <div class="list">${stale.slice(0, 8).map(a => `<div class="li"><div class="grow"><div class="nm">${esc(apptName(a))}</div><div class="muted small">${KINDS[a.kind]} · ${nice(a.date)}</div></div><button class="btn sm" data-act="outcome" data-id="${a.id}">Log</button></div>`).join('')}</div></div>` : ''}
-    <div class="panel"><h3>Coming up</h3><p class="muted small" style="margin:0">${dueNot ? `${dueNot} customer${dueNot === 1 ? ' is' : 's are'} due by ${niceShort(end)} with nothing scheduled.` : 'Every customer due this week has something scheduled.'}</p>${dueNot ? `<button class="btn" data-act="goto" data-view="plan">Open the Friday plan</button>` : ''}</div>
+    <div class="panel"><h3>Coming up</h3><p class="muted small" style="margin:0">${dueNot ? `${dueNot} customer${dueNot === 1 ? ' is' : 's are'} due by ${niceShort(end)} with nothing scheduled.` : 'Every customer due this week has something scheduled.'}</p>${dueNot ? `<button class="btn" data-act="goto" data-view="plan">Open Recap and Plan</button>` : ''}</div>
   </aside>`;
 }
 
@@ -400,15 +409,24 @@ function viewPlan() {
   const recapFrom = addDays(ws, -7), recapTo = addDays(ws, -1);
   const recaps = [...S.appts.values()].filter(a => a.status === 'completed' && a.kind === 'visit' && a.date >= recapFrom && a.date <= recapTo).sort((a, b) => a.date.localeCompare(b.date));
   const loads = days.map(d => ({ d, v: visitsOn(d).length, tc: apptsOn(d).filter(a => isTouch(a.kind)).length }));
+  const we = addDays(ws, 6), farEnd = addDays(ws, 27), byWhen = (x, y) => (x.date + (x.time || '')).localeCompare(y.date + (y.time || ''));
+  const upcoming = [...S.appts.values()].filter(a => isOpen(a) && a.date >= ws && a.date <= we).sort(byWhen);
+  // Further out: the three weeks after the plan week, scheduled or just due, wherever you owe them something
+  const further = [...S.appts.values()].filter(a => isOpen(a) && a.date > we && a.date <= farEnd).map(a => ({ a, c: S.customers.get(a.customerId), date: a.date, time: a.time, items: actionItems(a) }))
+    .concat([...S.customers.values()].filter(c => c.active !== false && !openApptFor(c.id)).map(c => ({ c, date: dueDate(c) })).filter(x => x.date && x.date > we && x.date <= farEnd)
+      .map(x => ({ ...x, items: actionItems({ customerId: x.c.id, id: '', date: x.date }) })))
+    .filter(x => x.items.length).sort(byWhen);
+  const taskCount = upcoming.reduce((n, a) => n + actionItems(a).length, 0);
   const candRows = cands.map(({ c, due, day }) => {
     const st = !due ? '<span class="pill warn">Never touched</span>' : due < ws ? `<span class="pill bad">Overdue since ${niceShort(due)}</span>` : `<span class="pill">Due ${nice(due)}</span>`;
     const opts = days.concat(addDays(ws, 5), addDays(ws, 6)).filter(d => d >= (ws < t ? t : ws)).map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${DAYS[dow(d)]} ${niceShort(d)}${!allowedDay(d, c.kind) ? ' (office)' : ''}</option>`).join('');
-    return `<div class="li"><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span><div class="grow"><button class="linkbtn nm" data-act="open-cust" data-id="${c.id}">${esc(custName(c))}</button><div class="row small">${st}<span class="muted">${cadenceLabel(c)}</span></div></div><select class="inp" style="width:auto" id="pd-${c.id}" aria-label="Day for ${esc(custName(c))}">${opts}</select><button class="btn sm" data-act="plan-one" data-id="${c.id}">Add</button></div>`;
+    return `<div class="li"><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span><div class="grow"><button class="linkbtn nm" data-act="open-cust" data-id="${c.id}">${esc(custName(c))}</button><div class="row small">${st}<span class="muted">${cadenceLabel(c)}</span></div>${taskList(actionItems({ customerId: c.id, id: '', date: we }))}</div><select class="inp" style="width:auto" id="pd-${c.id}" aria-label="Day for ${esc(custName(c))}">${opts}</select><button class="btn sm" data-act="plan-one" data-id="${c.id}">Add</button></div>`;
   }).join('');
-  return `<div class="toolbar"><h2>Friday plan</h2><div class="seg"><button data-act="pw" data-d="-7" aria-label="Previous week">‹</button><button aria-pressed="true" disabled style="opacity:1">Week of ${niceShort(ws)}</button><button data-act="pw" data-d="7" aria-label="Following week">›</button></div></div>
-  <p class="lead">Log anything left open, send this week's recaps, then fill next week. Suggested days follow each customer's rhythm, and if a day is full, Add all moves visits to the lightest day between Tuesday and Thursday.</p>
-  <div class="cols">
+  return `<div class="toolbar"><h2>Recap and Plan</h2><div class="seg"><button data-act="pw" data-d="-7" aria-label="Previous week">‹</button><button aria-pressed="true" disabled style="opacity:1">Week of ${niceShort(ws)}</button><button data-act="pw" data-d="7" aria-label="Following week">›</button></div></div>
+  <p class="lead"><b>Recap</b> wraps up the week that's ending: log what happened and send recaps. <b>Plan</b> sets up the week ahead and shows the action items you owe each customer. Suggested days follow each customer's rhythm, and if a day is full, Add all moves visits to the lightest day between Tuesday and Thursday.</p>
+  <div class="cols plan-cols">
     <div class="side">
+      <div class="colhead recap"><h2>Recap</h2><span class="muted small">Week of ${niceShort(recapFrom)}</span></div>
       <div class="panel"><div class="row"><h3>1 · Log what happened</h3><span class="spacer"></span>${stale.length ? `<span class="pill bad">${stale.length}</span>` : '<span class="pill ok">All logged</span>'}</div>
         ${stale.length ? `<div class="list">${stale.map(a => `<div class="li"><div class="grow"><div class="nm">${esc(apptName(a))}</div><div class="muted small">${KINDS[a.kind]} · ${nice(a.date)}${a.time ? ' · ' + t12(a.time) : ''}</div></div><button class="btn sm" data-act="quick-done" data-id="${a.id}">Done</button><button class="btn sm" data-act="outcome" data-id="${a.id}">More…</button></div>`).join('')}</div>` : '<div class="empty">Every past appointment has an outcome.</div>'}
       </div>
@@ -417,12 +435,19 @@ function viewPlan() {
       </div>
     </div>
     <div class="side">
+      <div class="colhead plan"><h2>Plan</h2><span class="muted small">Week of ${niceShort(ws)}</span></div>
       <div class="panel"><h3>3 · Week of ${niceShort(ws)}</h3>
         <div class="loadbars">${loads.map(({ d, v, tc }) => { const office = set().officeDays.includes(dow(d)); return `<div class="lb ${office ? 'office' : ''} ${v > cap ? 'over' : ''}"><div class="label">${DAYS[dow(d)]}</div><div class="big">${v}</div><div class="muted small">${office ? 'office' : 'of ' + cap}${tc ? ' · ' + tc + ' calls' : ''}</div>${office ? '' : `<div class="bar"><i style="width:${Math.min(100, v / cap * 100)}%"></i></div>`}${isBlackout(d) ? `<div class="pill bad" style="margin-top:4px">${esc(blackoutLabel(d))}</div>` : ''}</div>`; }).join('')}</div>
         <button class="btn sm" data-act="goto-week" data-date="${ws}">Open this week on the calendar</button>
       </div>
-      <div class="panel"><div class="row"><h3>Due, not scheduled</h3><span class="spacer"></span>${cands.length ? `<button class="btn primary sm" data-act="plan-all">Add all ${cands.length}</button>` : ''}</div>
+      <div class="panel"><div class="row"><h3>4 · Due, not scheduled</h3><span class="spacer"></span>${cands.length ? `<button class="btn primary sm" data-act="plan-all">Add all ${cands.length}</button>` : ''}</div>
         ${cands.length ? `<div class="list">${candRows}</div>` : '<div class="empty">Nothing is waiting. Everyone due this week has something scheduled.</div>'}
+      </div>
+      <div class="panel"><div class="row"><h3>Upcoming appointments</h3><span class="spacer"></span>${taskCount ? `<span class="pill warn">${taskCount} action item${taskCount === 1 ? '' : 's'}</span>` : ''}</div>
+        ${upcoming.length ? `<div class="list">${upcoming.map(a => { const items = actionItems(a); return `<div class="li start"><span class="pill ${isTouch(a.kind) ? 'touch' : 'ok'}">${ICON[a.kind] || ICON.visit}</span><div class="grow"><button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button><div class="muted small">${nice(a.date)}${a.time ? ' · ' + t12(a.time) : ''}${a.status === 'proposed' ? ' · proposed' : ''}</div>${items.length ? taskList(items) : '<div class="muted small">No action items</div>'}</div></div>`; }).join('')}</div>` : '<div class="empty">Nothing scheduled that week yet.</div>'}
+      </div>
+      <div class="panel"><div class="row"><h3>Further out</h3><span class="spacer"></span><span class="muted small">${niceShort(addDays(we, 1))}–${niceShort(farEnd)}</span></div>
+        ${further.length ? `<div class="list">${further.map(x => `<div class="li start"><div class="grow"><button class="linkbtn nm" data-act="${x.a ? 'open-appt' : 'open-cust'}" data-id="${x.a ? x.a.id : x.c.id}">${esc(x.a ? apptName(x.a) : custName(x.c))}</button><div class="muted small">${x.a ? nice(x.date) + (x.time ? ' · ' + t12(x.time) : '') : 'Due ' + nice(x.date) + ' · not scheduled'}</div>${taskList(x.items)}</div></div>`).join('')}</div>` : '<div class="empty">No action items for the following three weeks.</div>'}
       </div>
     </div>
   </div>`;
@@ -466,10 +491,11 @@ function viewConfirm() {
       const c = S.customers.get(a.customerId) || {};
       return `<div class="card"><div class="row"><b style="flex:1;min-width:0">${esc(apptName(a))}</b><span class="pill ${a.status === 'confirmed' ? 'ok' : a.status === 'proposed' ? 'warn' : a.status === 'completed' ? '' : 'bad'}">${a.status}</span></div>
         <div class="meta"><span>${ICON[a.kind]} ${KINDS[a.kind]}${a.time ? ' · ' + t12(a.time) : ''}</span>${c.contact ? `<span>${esc(c.contact)}</span>` : ''}${c.phone ? `<span class="copyable">${esc(c.phone)}</span>` : ''}${c.email ? `<span class="copyable">${esc(c.email)}</span>` : ''}</div>
+        ${isOpen(a) ? taskList(actionItems(a)) : ''}
         ${isOpen(a) ? `<div class="row"><button class="btn sm" data-act="copy-confirm" data-id="${a.id}">Copy message</button>${a.status === 'proposed' ? `<button class="btn sm primary" data-act="confirm" data-id="${a.id}">Confirmed</button>` : `<button class="btn sm" data-act="unconfirm" data-id="${a.id}">Undo confirm</button>`}<button class="btn sm" data-act="open-appt" data-id="${a.id}">Move…</button><button class="btn sm danger" data-act="outcome" data-id="${a.id}" data-status="cancelled">Cancel</button></div>` : ''}
       </div>`;
     }).join('')}</div>`;
-  }).join('') || '<div class="panel"><div class="empty">Nothing is scheduled that week yet. Fill it from the Friday plan.</div><button class="btn" data-act="goto" data-view="plan">Open the Friday plan</button></div>'}</div>`;
+  }).join('') || '<div class="panel"><div class="empty">Nothing is scheduled that week yet. Fill it from Recap and Plan.</div><button class="btn" data-act="goto" data-view="plan">Open Recap and Plan</button></div>'}</div>`;
 }
 
 /* ============ CUSTOMERS ============ */
@@ -604,6 +630,7 @@ function apptDialog(a, preset = {}) {
   const date = a?.date || preset.date || today();
   const time = a ? a.time : (preset.time || (kind === 'visit' ? findSlot(date, +(c0?.duration || set().visitLength), c0?.preferredTime) : ''));
   if (!S.customers.size) { toast('Add a customer first.'); return; }
+  const prevTasks = a && isOpen(a) ? actionItems(a).filter(i => i.from !== a) : [];
   openDialog(`
     <div class="dlg-h"><h2>${isNew ? 'New appointment' : esc(apptName(a))}</h2>${a ? `<span class="pill ${a.status === 'confirmed' ? 'ok' : a.status === 'proposed' ? 'warn' : a.status === 'completed' ? '' : 'bad'}">${a.status}</span>` : ''}<button class="x" data-close aria-label="Close">×</button></div>
     <div class="dlg-b">
@@ -617,6 +644,8 @@ function apptDialog(a, preset = {}) {
         <div class="fld"><span>Their rhythm</span><div class="small muted" id="ad-r" style="padding-top:6px"></div></div>
         <label class="fld full"><span>Agenda / prep notes</span><textarea id="ad-n" placeholder="What you plan to cover…">${esc(a?.notes || '')}</textarea></label>
         <label class="fld full"><span>Recap <span class="muted">(after the meeting; one point per line becomes a bullet in your Friday email)</span></span><textarea id="ad-rc" rows="5" placeholder="Reviewed Q4 order&#10;Wants pricing on bulk pallets&#10;Follow up with samples">${esc(a?.recap || '')}</textarea></label>
+        ${prevTasks.length ? `<div class="note full"><div class="label" style="margin-bottom:4px">My action items from the ${KINDS[prevTasks[0].from.kind].toLowerCase()} on ${nice(prevTasks[0].from.date)}</div>${taskList(prevTasks)}</div>` : ''}
+        <label class="fld full"><span>My action items <span class="muted">(what you'll do for them before the next meeting; one per line)</span></span><textarea id="ad-ai" rows="3" placeholder="e.g. Send bulk pallet pricing">${esc(a?.actions || '')}</textarea></label>
       </div>
       <div id="ad-w"></div>
       ${a ? filesBlock(a.id) : '<div class="note small">You can attach files after the appointment is added.</div>'}
@@ -637,21 +666,21 @@ function apptDialog(a, preset = {}) {
       g('#ad-save').onclick = async () => {
         const cid2 = g('#ad-c').value; if (!cid2) { toast('Choose a customer.'); return; }
         const d = g('#ad-d').value; if (!d) { toast('Pick a date.'); return; }
-        const t = g('#ad-t').value, k = g('#ad-k').value, st = g('#ad-s').value, dur = +g('#ad-l').value || set().visitLength, notes = g('#ad-n').value, recap = g('#ad-rc').value;
+        const t = g('#ad-t').value, k = g('#ad-k').value, st = g('#ad-s').value, dur = +g('#ad-l').value || set().visitLength, notes = g('#ad-n').value, recap = g('#ad-rc').value, actions = g('#ad-ai').value;
         if (isNew) {
           close();
           const c = S.customers.get(cid2);
           if (c && !hasHome(c) && c.unit !== 'days' && k === 'visit') await guard(cRef(c.id).update({ homeDay: dow(d) }));
-          const id = await createAppt({ customerId: cid2, date: d, time: t, kind: k, status: st === 'completed' ? 'proposed' : st, duration: dur, notes, recap });
-          if (id && st === 'completed') await setOutcome(S.appts.get(id), 'completed', { notes, recap });
+          const id = await createAppt({ customerId: cid2, date: d, time: t, kind: k, status: st === 'completed' ? 'proposed' : st, duration: dur, notes, recap, actions });
+          if (id && st === 'completed') await setOutcome(S.appts.get(id), 'completed', { notes, recap, actions });
           else if (id) { toast('Added. Open it again to attach files.'); render(); }
           return;
         }
         close();
-        const base = { kind: k, duration: dur, notes, recap, customerId: cid2 };
+        const base = { kind: k, duration: dur, notes, recap, actions, customerId: cid2 };
         if (st !== a.status && ['completed', 'missed', 'cancelled'].includes(st) && isOpen(a)) {
           await guard(aRef(a.id).update({ ...base, date: d, time: t }));
-          await setOutcome({ ...a, ...base, date: d, time: t }, st, { notes, recap });
+          await setOutcome({ ...a, ...base, date: d, time: t }, st, { notes, recap, actions });
           return;
         }
         await guard(aRef(a.id).update({ ...base, status: st, time: d === a.date ? t : a.time }), d === a.date ? 'Saved.' : null);
@@ -663,7 +692,7 @@ function apptDialog(a, preset = {}) {
           if (del.dataset.armed) { close(); await guard(aRef(a.id).delete(), 'Deleted.'); S.appts.delete(a.id); render(); return; }
           del.dataset.armed = 1; del.textContent = S.fileCounts[a.id] ? 'Click again: deletes it and its files' : 'Click again to delete'; del.classList.add('solid');
         };
-        const out = g('#ad-out'); if (out) out.onclick = () => { close(); outcomeDialog({ ...a, recap: g('#ad-rc').value, notes: g('#ad-n').value }); };
+        const out = g('#ad-out'); if (out) out.onclick = () => { close(); outcomeDialog({ ...a, recap: g('#ad-rc').value, notes: g('#ad-n').value, actions: g('#ad-ai').value }); };
       }
     }, null, true);
 }
@@ -676,6 +705,7 @@ function outcomeDialog(a, preStatus) {
     <div class="dlg-b">
       <div class="fld"><span>What happened?</span><div class="seg" id="oc-s">${[['completed', 'Done'], ['missed', 'Missed / no-show'], ['cancelled', 'Cancelled']].map(([k, l]) => `<button data-v="${k}" aria-pressed="${k === (preStatus || 'completed')}">${l}</button>`).join('')}</div></div>
       <label class="fld"><span>Recap <span class="muted">(one point per line; used in your Friday email)</span></span><textarea id="oc-n" rows="5" placeholder="What you covered, next steps…">${esc(a.recap || '')}</textarea></label>
+      <label class="fld"><span>My action items <span class="muted">(what you'll do before the next meeting; one per line)</span></span><textarea id="oc-ai" rows="3" placeholder="Send bulk pallet pricing">${esc(a.actions || '')}</textarea></label>
       <p class="muted small" style="margin:0">To attach files, open the appointment after saving.</p>
       ${c ? `<div class="panel" style="padding:12px;background:var(--surface-2);border:0">
         <label class="cb"><input type="checkbox" id="oc-skip" ${set().autoNext === false || openApptFor(c.id, a.id) ? 'checked' : ''}><span>Don't schedule the next one${openApptFor(c.id, a.id) ? ' (they already have ' + nice(openApptFor(c.id, a.id).date) + ')' : ''}</span></label>
@@ -697,7 +727,7 @@ function outcomeDialog(a, preStatus) {
       if (d) d.onchange = () => { el.querySelector('#oc-nr-wrap').hidden = d.value === nextD; };
       el.querySelector('#oc-save').onclick = async () => {
         close();
-        const o = { recap: el.querySelector('#oc-n').value };
+        const o = { recap: el.querySelector('#oc-n').value, actions: el.querySelector('#oc-ai').value };
         if (a.notes !== undefined) o.notes = a.notes;
         if (c) {
           o.skipNext = skip.checked;
@@ -773,6 +803,7 @@ function logTouchDialog(c) {
     <div class="dlg-b"><p class="muted small" style="margin:0">For a call, email or drop-in that wasn't on the calendar.</p>
       <div class="form"><label class="fld"><span>Type</span><select id="lt-k">${Object.entries(KINDS).map(([k, l]) => `<option value="${k}" ${k === (c.kind || 'visit') ? 'selected' : ''}>${l}</option>`).join('')}</select></label><label class="fld"><span>Date</span><input type="date" id="lt-d" value="${today()}"></label>
       <label class="fld full"><span>Recap</span><textarea id="lt-n" placeholder="What you talked about…"></textarea></label>
+      <label class="fld full"><span>My action items <span class="muted">(one per line)</span></span><textarea id="lt-ai" rows="3" placeholder="What you'll do before the next meeting…"></textarea></label>
       <label class="cb full"><input type="checkbox" id="lt-r" checked><span>Restart their cadence from this date${openApptFor(c.id) && openApptFor(c.id).status === 'proposed' ? ' and move their proposed ' + nice(openApptFor(c.id).date) + ' appointment to match' : ''}</span></label></div>
     </div>
     <div class="dlg-f"><span class="spacer"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="lt-save">Log it</button></div>`,
@@ -781,7 +812,7 @@ function logTouchDialog(c) {
         if (!needDb()) return;
         close();
         const d = el.querySelector('#lt-d').value || today(), k = el.querySelector('#lt-k').value, restart = el.querySelector('#lt-r').checked;
-        const doc = { customerId: c.id, name: custName(c), kind: k, date: d, time: '', duration: 30, status: 'completed', rhythmDate: d, notes: '', recap: el.querySelector('#lt-n').value, recapSent: false, createdAt: Date.now(), outcomeAt: Date.now() };
+        const doc = { customerId: c.id, name: custName(c), kind: k, date: d, time: '', duration: 30, status: 'completed', rhythmDate: d, notes: '', recap: el.querySelector('#lt-n').value, actions: el.querySelector('#lt-ai').value, recapSent: false, createdAt: Date.now(), outcomeAt: Date.now() };
         if (c.example) doc.example = true;
         const id = uid();
         await guard(aRef(id).set(doc)); S.appts.set(id, { id, ...doc });

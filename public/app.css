@@ -293,3 +293,13 @@ a.btn.primary { color: var(--accent-ink); }
   .li .grow { min-width: 55%; }
   .li select.inp { flex: 1; min-width: 150px; }
 }
+
+/* Recap and Plan */
+.colhead { display: flex; align-items: baseline; gap: 10px; padding: 0 2px 6px; border-bottom: 3px solid var(--line); }
+.colhead h2 { margin: 0; font-size: 1.15rem; }
+.colhead.plan { border-color: var(--accent); }
+.colhead.recap { border-color: var(--muted); }
+.li.start { align-items: flex-start; }
+.tasks { margin: 4px 0 0; padding-left: 18px; font-size: .88rem; }
+.tasks li { margin: 2px 0; }
+.card .tasks { margin: 0; }
