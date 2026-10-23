@@ -41,6 +41,7 @@ const DEFAULT_SETTINGS = {
   confirmTemplate: 'Hi {first}, just confirming our {kind} on {day} at {time}. Let me know if anything changes. Thanks, {me}',
   recapTemplate: 'Hi {first},\n\nThanks for your time on {day}. Quick recap:\n{recap}\n\nI\'ll touch base again around {next}.\n\nThanks,\n{me}',
   theme: { mode: 'system', accent: 'slate' }, weekStart: 0,
+  prospectCadence: 2, coldAfter: 4, productCategories: ['Equipment', 'Accessories', 'Minisplits', 'Crossover', 'Samsung'], competitors: [],
 };
 
 /* ============ state ============ */
@@ -97,6 +98,16 @@ function openApptFor(cid, exceptId) {
   for (const a of S.appts.values()) if (a.customerId === cid && a.id !== exceptId && isOpen(a) && (!best || a.date < best.date)) best = a;
   return best;
 }
+// Calendar color group: prospects yellow, assigned accounts green, everyone else blue
+const custGroup = c => c?.prospect ? 'prospect' : c?.assigned ? 'assigned' : 'open';
+// A prospect is going cold once they've had coldAfter follow-ups (done or missed) since becoming a prospect
+function isCold(c) {
+  if (!c?.prospect || c.active === false) return false;
+  const n = [...S.appts.values()].filter(a => a.customerId === c.id && (a.status === 'completed' || a.status === 'missed') && a.date >= (c.prospectSince || '')).length;
+  return n >= (+set().coldAfter || 4);
+}
+const custTags = c => `${c.prospect ? ' <span class="pill prospect">Prospect</span>' : c.assigned ? ' <span class="pill assigned">Assigned</span>' : ''}${isCold(c) ? ' <span class="pill bad">Going cold</span>' : ''}`;
+const competitorNames = () => [...new Set([...(set().competitors || []), ...[...S.customers.values()].map(c => (c.competitor || '').trim())].filter(Boolean))].sort((a, b) => a.localeCompare(b));
 function cadenceLabel(c) { const n = +c.cadence || set().defaultCadence; return c.unit === 'days' ? `Every ${n} day${n == 1 ? '' : 's'}` : `Every ${n} wk${n == 1 ? '' : 's'}`; }
 function customerState(c) {
   const t = today();
@@ -277,7 +288,7 @@ function render() {
 window.matchMedia('(max-width: 760px)').addEventListener('change', () => render());
 
 /* ============ chip / event markup ============ */
-function evClass(a) { return `${isTouch(a.kind) ? 'k-touch' : 'k-visit'} s-${a.status}`; }
+function evClass(a) { return `g-${custGroup(S.customers.get(a.customerId))} s-${a.status}`; }
 function evTitle(a) { return `${KINDS[a.kind] || 'Visit'}: ${apptName(a)} · ${a.status}${a.time ? ' · ' + t12(a.time) : ''}`; }
 function chip(a, extra = '') {
   return `<button class="chip ${evClass(a)}" data-appt="${a.id}" title="${esc(evTitle(a))}" ${extra}>${a.status === 'completed' ? ICON.check : ICON[a.kind] || ICON.visit}<span>${a.time ? t12s(a.time) + ' ' : ''}${esc(apptName(a))}</span>${S.fileCounts[a.id] ? ICON.clip : ''}</button>`;
@@ -302,7 +313,7 @@ function viewWeek() {
   return tb + `<div class="week-wrap"><div class="cal">${weekGrid(days)}${legend()}</div>${side}</div>`;
 }
 function legend() {
-  return `<div class="legend"><span><i class="k-visit" style="background:var(--accent-soft)"></i>Visit, confirmed</span><span><i class="k-visit s-proposed" style="border-style:dashed"></i>Proposed</span><span><i class="k-touch" style="background:var(--touch-soft)"></i>Call / email / text</span><span><i style="background:var(--surface-2)"></i>Done</span><span><i style="background:var(--red-soft)"></i>Missed</span><span><i style="background:var(--office)"></i>Office day</span><span class="spacer"></span><span>Drag to move · click an empty slot to add</span></div>`;
+  return `<div class="legend"><span><i class="g-assigned"></i>Assigned account</span><span><i class="g-open"></i>Not assigned</span><span><i class="g-prospect"></i>Prospect</span><span><i class="g-open s-proposed"></i>Proposed</span><span><i style="background:var(--surface-2)"></i>Done</span><span><i style="background:var(--red-soft)"></i>Missed</span><span><i style="background:var(--office)"></i>Office day</span><span class="spacer"></span><span>Drag to move · click an empty slot to add</span></div>`;
 }
 const PX = 48;
 function weekGrid(days) {
@@ -422,7 +433,7 @@ function viewPlan() {
   const candRows = cands.map(({ c, due, day }) => {
     const st = !due ? '<span class="pill warn">Never touched</span>' : due < ws ? `<span class="pill bad">Overdue since ${niceShort(due)}</span>` : `<span class="pill">Due ${nice(due)}</span>`;
     const opts = days.concat(addDays(ws, 5), addDays(ws, 6)).filter(d => d >= (ws < t ? t : ws)).map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${DAYS[dow(d)]} ${niceShort(d)}${!allowedDay(d, c.kind) ? ' (office)' : ''}</option>`).join('');
-    return `<div class="li"><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span><div class="grow"><button class="linkbtn nm" data-act="open-cust" data-id="${c.id}">${esc(custName(c))}</button><div class="row small">${st}<span class="muted">${cadenceLabel(c)}</span></div>${taskList(actionItems({ customerId: c.id, id: '', date: we }))}</div><select class="inp" style="width:auto" id="pd-${c.id}" aria-label="Day for ${esc(custName(c))}">${opts}</select><button class="btn sm" data-act="plan-one" data-id="${c.id}">Add</button></div>`;
+    return `<div class="li"><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span><div class="grow"><button class="linkbtn nm" data-act="open-cust" data-id="${c.id}">${esc(custName(c))}</button><div class="row small">${st}${custTags(c)}<span class="muted">${cadenceLabel(c)}</span></div>${taskList(actionItems({ customerId: c.id, id: '', date: we }))}</div><select class="inp" style="width:auto" id="pd-${c.id}" aria-label="Day for ${esc(custName(c))}">${opts}</select><button class="btn sm" data-act="plan-one" data-id="${c.id}">Add</button></div>`;
   }).join('');
   return `<div class="toolbar"><h2>Recap and Plan</h2><div class="seg"><button data-act="pw" data-d="-7" aria-label="Previous week">‹</button><button aria-pressed="true" disabled style="opacity:1">Week of ${niceShort(ws)}</button><button data-act="pw" data-d="7" aria-label="Following week">›</button></div></div>
   <p class="lead"><b>Recap</b> wraps up the week that's ending: log what happened and send recaps. <b>Plan</b> sets up the week ahead and shows the action items you owe each customer. Suggested days follow each customer's rhythm, and if a day is full, Add all moves visits to the lightest day between Tuesday and Thursday.</p>
@@ -442,14 +453,14 @@ function viewPlan() {
         <div class="loadbars">${loads.map(({ d, v, tc }) => { const office = set().officeDays.includes(dow(d)); return `<div class="lb ${office ? 'office' : ''} ${v > cap ? 'over' : ''}"><div class="label">${DAYS[dow(d)]}</div><div class="big">${v}</div><div class="muted small">${office ? 'office' : 'of ' + cap}${tc ? ' · ' + tc + ' calls' : ''}</div>${office ? '' : `<div class="bar"><i style="width:${Math.min(100, v / cap * 100)}%"></i></div>`}${isBlackout(d) ? `<div class="pill bad" style="margin-top:4px">${esc(blackoutLabel(d))}</div>` : ''}</div>`; }).join('')}</div>
         <button class="btn sm" data-act="goto-week" data-date="${ws}">Open this week on the calendar</button>
       </div>
-      <div class="panel"><div class="row"><h3>4 · Due, not scheduled</h3><span class="spacer"></span>${cands.length ? `<button class="btn primary sm" data-act="plan-all">Add all ${cands.length}</button>` : ''}</div>
-        ${cands.length ? `<div class="list">${candRows}</div>` : '<div class="empty">Nothing is waiting. Everyone due this week has something scheduled.</div>'}
-      </div>
       <div class="panel"><div class="row"><h3>Upcoming appointments</h3><span class="spacer"></span>${taskCount ? `<span class="pill warn">${taskCount} action item${taskCount === 1 ? '' : 's'}</span>` : ''}</div>
         ${upcoming.length ? `<div class="list">${upcoming.map(a => { const items = actionItems(a); return `<div class="li start"><span class="pill ${isTouch(a.kind) ? 'touch' : 'ok'}">${ICON[a.kind] || ICON.visit}</span><div class="grow"><button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button><div class="muted small">${nice(a.date)}${a.time ? ' · ' + t12(a.time) : ''}${a.status === 'proposed' ? ' · proposed' : ''}</div>${items.length ? taskList(items) : '<div class="muted small">No action items</div>'}</div></div>`; }).join('')}</div>` : '<div class="empty">Nothing scheduled that week yet.</div>'}
       </div>
       <div class="panel"><div class="row"><h3>Further out</h3><span class="spacer"></span><span class="muted small">${niceShort(addDays(we, 1))}–${niceShort(farEnd)}</span></div>
         ${further.length ? `<div class="list">${further.map(x => `<div class="li start"><div class="grow"><button class="linkbtn nm" data-act="${x.a ? 'open-appt' : 'open-cust'}" data-id="${x.a ? x.a.id : x.c.id}">${esc(x.a ? apptName(x.a) : custName(x.c))}</button><div class="muted small">${x.a ? nice(x.date) + (x.time ? ' · ' + t12(x.time) : '') : 'Due ' + nice(x.date) + ' · not scheduled'}</div>${taskList(x.items)}</div></div>`).join('')}</div>` : '<div class="empty">No action items for the following three weeks.</div>'}
+      </div>
+      <div class="panel"><div class="row"><h3>4 · Due, not scheduled</h3><span class="spacer"></span>${cands.length ? `<button class="btn primary sm" data-act="plan-all">Add all ${cands.length}</button>` : ''}</div>
+        ${cands.length ? `<div class="list">${candRows}</div>` : '<div class="empty">Nothing is waiting. Everyone due this week has something scheduled.</div>'}
       </div>
     </div>
   </div>`;
@@ -504,21 +515,23 @@ function viewConfirm() {
 function viewCustomers() {
   const q = S.q.trim().toLowerCase();
   let list = [...S.customers.values()].map(c => ({ c, st: customerState(c) }));
-  if (q) list = list.filter(({ c }) => [c.name, c.custId, c.contact, c.email, c.phone, c.address, c.notes].some(v => String(v || '').toLowerCase().includes(q)));
+  if (q) list = list.filter(({ c }) => [c.name, c.custId, c.contact, c.email, c.phone, c.address, c.notes, c.competitor, (c.products || []).join(' ')].some(v => String(v || '').toLowerCase().includes(q)));
   if (S.filter === 'visit') list = list.filter(x => (x.c.kind || 'visit') === 'visit');
   if (S.filter === 'touch') list = list.filter(x => isTouch(x.c.kind));
   if (S.filter === 'attn') list = list.filter(x => x.st.rank <= 3);
+  if (S.filter === 'prospect') list = list.filter(x => x.c.prospect);
+  if (S.filter === 'assigned') list = list.filter(x => x.c.assigned && !x.c.prospect);
   if (S.sort === 'name') list.sort((a, b) => custName(a.c).localeCompare(custName(b.c)));
   else list.sort((a, b) => a.st.rank - b.st.rank || a.st.sortDate.localeCompare(b.st.sortDate) || custName(a.c).localeCompare(custName(b.c)));
   const ex = [...S.customers.values()].some(c => c.example);
   const attn = [...S.customers.values()].filter(c => customerState(c).rank <= 3).length;
   return `<div class="toolbar"><h2>Customers</h2><input class="search" id="cust-q" type="search" placeholder="Search name, ID, contact, city…" value="${esc(S.q)}" aria-label="Search customers">
-    <div class="seg">${[['all', 'All'], ['attn', `Needs attention${attn ? ' (' + attn + ')' : ''}`], ['visit', 'Visits'], ['touch', 'Calls & emails']].map(([k, l]) => `<button data-act="cfilter" data-f="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}</div>
+    <div class="seg">${[['all', 'All'], ['attn', `Needs attention${attn ? ' (' + attn + ')' : ''}`], ['prospect', 'Prospects'], ['assigned', 'Assigned'], ['visit', 'Visits'], ['touch', 'Calls & emails']].map(([k, l]) => `<button data-act="cfilter" data-f="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}</div>
     <span class="spacer"></span><button class="btn" data-act="import">Import</button><button class="btn" data-act="export-cust">Export</button><button class="btn primary" data-act="new-cust">+ Customer</button></div>
   ${ex ? `<div class="note warn row" style="margin-bottom:12px"><span style="flex:1;min-width:0">The customers marked “example” are sample data so you can see how things work. Delete them when you're ready to bring in your own.</span><button class="btn sm" data-act="clear-examples">Delete examples</button></div>` : ''}
   ${S.customers.size === 0 ? `<div class="panel" style="max-width:560px"><h3>No customers yet</h3><p class="muted" style="margin:0">Import a spreadsheet or CSV from your CRM, paste rows copied from Excel, or add customers one at a time. Everyone starts on a ${set().defaultCadence}-week cadence, and you can change any of them.</p><div class="row"><button class="btn primary" data-act="import">Import customers</button><button class="btn" data-act="new-cust">Add one</button></div></div>` : `
   <div class="tbl-wrap"><table><thead><tr><th><button class="linkbtn label" data-act="csort" data-s="name">Customer${S.sort === 'name' ? ' ↓' : ''}</button></th><th>Type</th><th>Cadence</th><th>Day</th><th>Last touch</th><th><button class="linkbtn label" data-act="csort" data-s="next">Next${S.sort === 'next' ? ' ↓' : ''}</button></th></tr></thead><tbody>
-  ${list.map(({ c, st }) => `<tr data-act="open-cust" data-id="${c.id}" class="${c.active === false ? 'paused' : ''}"><td><b>${esc(custName(c))}</b>${c.example ? ' <span class="pill">example</span>' : ''}<div class="sub">${esc([c.custId && '#' + c.custId, c.contact, c.address].filter(Boolean).join(' · '))}</div></td><td><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span></td><td>${cadenceLabel(c)}</td><td>${hasHome(c) ? DAYS[+c.homeDay] : '<span class="muted">—</span>'}</td><td>${c.lastTouch ? niceShort(c.lastTouch) : '<span class="muted">—</span>'}</td><td><span class="pill ${st.cls}">${st.text}</span></td></tr>`).join('')}
+  ${list.map(({ c, st }) => `<tr data-act="open-cust" data-id="${c.id}" class="${c.active === false ? 'paused' : ''}"><td><b>${esc(custName(c))}</b>${custTags(c)}${c.example ? ' <span class="pill">example</span>' : ''}<div class="sub">${esc([c.custId && '#' + c.custId, c.contact, c.address, (c.products || []).join(', ')].filter(Boolean).join(' · '))}</div></td><td><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span></td><td>${cadenceLabel(c)}</td><td>${hasHome(c) ? DAYS[+c.homeDay] : '<span class="muted">—</span>'}</td><td>${c.lastTouch ? niceShort(c.lastTouch) : '<span class="muted">—</span>'}</td><td><span class="pill ${st.cls}">${st.text}</span></td></tr>`).join('')}
   </tbody></table>${list.length ? '' : '<div class="empty" style="padding:14px">No customers match.</div>'}</div>`}`;
 }
 
@@ -545,8 +558,13 @@ function viewSettings() {
     </div>
     <div class="panel"><h3>Cadence</h3>
       <div class="form"><label class="fld"><span>Default cadence for new customers</span><div class="inline"><input type="number" min="1" id="s-dc" data-set="defaultCadence" data-num value="${s.defaultCadence}"><select id="s-du" data-set="defaultUnit"><option value="weeks">weeks</option><option value="days" ${s.defaultUnit === 'days' ? 'selected' : ''}>days</option></select></div></label>
-      <label class="fld"><span>When you log an outcome</span><select id="s-an" data-set="autoNext" data-bool><option value="true">Propose the next one</option><option value="false" ${s.autoNext === false ? 'selected' : ''}>Don't schedule anything</option></select></label></div>
+      <label class="fld"><span>When you log an outcome</span><select id="s-an" data-set="autoNext" data-bool><option value="true">Propose the next one</option><option value="false" ${s.autoNext === false ? 'selected' : ''}>Don't schedule anything</option></select></label>
+      <label class="fld"><span>Prospect follow-up (weeks)</span><input type="number" min="1" id="s-pc" data-set="prospectCadence" data-num value="${s.prospectCadence}"></label>
+      <label class="fld"><span>Prospect is “going cold” after this many follow-ups</span><input type="number" min="1" id="s-cold" data-set="coldAfter" data-num value="${s.coldAfter}"></label></div>
       <p class="muted small" style="margin:0">The next date is counted from the original appointment date, even if the visit was missed or moved just that once. A day-based cadence that lands on an office day moves to the nearest visit day: Monday moves to Tuesday and Friday moves to Thursday.</p>
+    </div>
+    <div class="panel"><h3>Product categories</h3><p class="muted small" style="margin:0">The “Currently buying” checkboxes on each customer. Add more with the + on any customer.</p>
+      <div class="list">${(s.productCategories || []).map(p => `<div class="li"><div class="grow">${esc(p)}</div><button class="btn sm danger" data-act="cat-del" data-v="${esc(p)}">Remove</button></div>`).join('') || '<div class="empty">None yet.</div>'}</div>
     </div>
     <div class="panel"><h3>Holidays & time off</h3><p class="muted small" style="margin:0">Blocked days are shaded on the calendar and skipped when suggesting dates.</p>
       <div class="list">${bl.length ? bl.map((b, i) => `<div class="li"><div class="grow"><b>${esc(b.label || 'Blocked')}</b><div class="muted small">${nice(b.start)}${b.end && b.end !== b.start ? ' – ' + nice(b.end) : ''}</div></div><button class="btn sm danger" data-act="bl-del" data-start="${b.start}" data-label="${esc(b.label || '')}">Remove</button></div>`).join('') : '<div class="empty">None yet.</div>'}</div>
@@ -560,11 +578,11 @@ function viewSettings() {
     </div>
   </div>`;
 }
-async function saveSettings(patch) {
+async function saveSettings(patch, quiet) {
   S.settings = { ...S.settings, ...patch };
   if (!needDb()) return;
   const { showWeekend, ...rest } = S.settings;
-  await guard(S.db.doc('config/settings').set({ ...rest, showWeekend: !!showWeekend }), patch.theme ? null : 'Settings saved.');
+  await guard(S.db.doc('config/settings').set({ ...rest, showWeekend: !!showWeekend }), patch.theme || quiet ? null : 'Settings saved.');
 }
 
 /* ============ dialogs ============ */
@@ -748,7 +766,7 @@ function customerDialog(c) {
   const st = isNew ? null : customerState(c);
   const due = isNew ? null : dueDate(c);
   openDialog(`
-    <div class="dlg-h"><h2>${isNew ? 'New customer' : esc(custName(c))}</h2>${st ? `<span class="pill ${st.cls}">${st.text}</span>` : ''}<button class="x" data-close aria-label="Close">×</button></div>
+    <div class="dlg-h"><h2>${isNew ? 'New customer' : esc(custName(c))}</h2>${isNew ? '' : custTags(c)}${st ? `<span class="pill ${st.cls}">${st.text}</span>` : ''}<button class="x" data-close aria-label="Close">×</button></div>
     <div class="dlg-b">
       <div class="form">
         <label class="fld full"><span>Account / customer name</span><input id="cd-name" value="${esc(c.name)}" autofocus></label>
@@ -757,6 +775,11 @@ function customerDialog(c) {
         <label class="fld"><span>Phone</span><input id="cd-phone" type="tel" value="${esc(c.phone)}"></label>
         <label class="fld"><span>Email</span><input id="cd-email" type="email" value="${esc(c.email)}"></label>
         <label class="fld"><span>Address / city</span><input id="cd-address" value="${esc(c.address)}"></label>
+        <label class="fld"><span>Competitor equipment brand</span><input id="cd-comp" list="cd-comp-list" autocomplete="off" value="${esc(c.competitor || '')}"><datalist id="cd-comp-list">${competitorNames().map(n => `<option value="${esc(n)}">`).join('')}</datalist></label>
+        <label class="cb"><input type="checkbox" id="cd-prospect" ${c.prospect ? 'checked' : ''}><span>Prospect <span class="muted">(follow up every ${+set().prospectCadence || 2} weeks)</span></span></label>
+        <label class="cb"><input type="checkbox" id="cd-assigned" ${c.assigned ? 'checked' : ''}><span>Assigned account</span></label>
+        <div class="fld full"><span>Currently buying</span><div class="daypick" id="cd-prods"></div>
+          <div class="row" id="cd-cat-add" hidden><input class="inp" id="cd-cat-new" placeholder="New category" style="max-width:220px"><button class="btn sm" id="cd-cat-ok" type="button">Add</button></div></div>
         <label class="fld"><span>How you touch them</span><select id="cd-kind">${Object.entries(KINDS).map(([k, l]) => `<option value="${k}" ${k === (c.kind || 'visit') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="fld"><span>Cadence</span><div class="inline"><input type="number" min="1" id="cd-cad" value="${c.cadence || set().defaultCadence}" style="width:80px"><select id="cd-unit"><option value="weeks">weeks</option><option value="days" ${c.unit === 'days' ? 'selected' : ''}>days</option></select></div></label>
         <label class="fld"><span>Their day</span><select id="cd-home"><option value="">Not set (taken from first visit)</option>${[1, 2, 3, 4, 5].map(d => `<option value="${d}" ${String(c.homeDay) === String(d) ? 'selected' : ''}>${DAYS_LONG[d]}</option>`).join('')}</select></label>
@@ -769,18 +792,44 @@ function customerDialog(c) {
       ${isNew ? '' : `<div class="note">${due ? `Next due <b>${nice(due)}</b>, counted from ${nice(c.rhythmDate)}.` : 'No visits logged yet. Schedule the first one, or set a last on-rhythm date above.'}${c.lastTouch ? ` Last touched ${nice(c.lastTouch)}.` : ''}</div>
       <div><div class="label" style="margin-bottom:4px">History</div><div class="list hist">${hist.length ? hist.map(a => `<div class="li"><span class="swatch ${evClass(a)}"></span><div class="grow"><button class="linkbtn" data-hist="${a.id}">${nice(a.date)}${a.time ? ' · ' + t12(a.time) : ''}</button><div class="muted small">${KINDS[a.kind]} · ${a.status}${(a.recap || a.notes) ? ' · ' + esc((a.recap || a.notes).slice(0, 80)) : ''}${S.fileCounts[a.id] ? ' · ' + ICON.clip + S.fileCounts[a.id] : ''}</div></div></div>`).join('') : '<div class="empty">Nothing yet.</div>'}</div></div>`}
     </div>
-    <div class="dlg-f">${isNew ? '' : '<button class="btn danger" id="cd-del">Delete</button>'}<span class="spacer"></span>${isNew ? '' : '<button class="btn" id="cd-sched">Schedule next</button><button class="btn" id="cd-log">Log a touch</button>'}<button class="btn" data-close>Close</button><button class="btn primary" id="cd-save">${isNew ? 'Add customer' : 'Save'}</button></div>`,
+    <div class="dlg-f">${isNew ? '' : '<button class="btn danger" id="cd-del">Delete</button>'}<span class="spacer"></span>${!isNew && c.prospect ? '<button class="btn" id="cd-convert">Convert to customer</button>' : ''}${isNew ? '' : '<button class="btn" id="cd-sched">Schedule next</button><button class="btn" id="cd-log">Log a touch</button>'}<button class="btn" data-close>Close</button><button class="btn primary" id="cd-save">${isNew ? 'Add customer' : 'Save'}</button></div>`,
     (el, close) => {
       const g = id => el.querySelector(id);
       const read = () => ({
         name: g('#cd-name').value.trim(), custId: g('#cd-custid').value.trim(), contact: g('#cd-contact').value.trim(), phone: g('#cd-phone').value.trim(), email: g('#cd-email').value.trim(), address: g('#cd-address').value.trim(),
         kind: g('#cd-kind').value, cadence: Math.max(1, +g('#cd-cad').value || 3), unit: g('#cd-unit').value, homeDay: g('#cd-home').value === '' ? '' : +g('#cd-home').value,
         preferredTime: g('#cd-time').value, duration: +g('#cd-dur').value || set().visitLength, rhythmDate: g('#cd-rhythm').value, notes: g('#cd-notes').value, active: g('#cd-active').checked,
+        prospect: g('#cd-prospect').checked, assigned: g('#cd-assigned').checked, competitor: g('#cd-comp').value.trim(),
+        products: [...el.querySelectorAll('#cd-prods input:checked')].map(x => x.value),
       });
+      // product checkboxes: your categories plus anything this customer already has, and a + to add one
+      const drawProds = (checked = c.products || []) => {
+        const cats = [...new Set([...(set().productCategories || []), ...checked])];
+        g('#cd-prods').innerHTML = cats.map(p => `<label><input type="checkbox" value="${esc(p)}" ${checked.includes(p) ? 'checked' : ''}>${esc(p)}</label>`).join('') + '<button class="btn sm" id="cd-cat-plus" type="button" aria-label="Add a category" title="Add a category">+</button>';
+        g('#cd-cat-plus').onclick = () => { g('#cd-cat-add').hidden = false; g('#cd-cat-new').focus(); };
+      };
+      drawProds();
+      const addCat = async () => {
+        const v = g('#cd-cat-new').value.trim(); if (!v) return;
+        const cats = set().productCategories || [], have = [...el.querySelectorAll('#cd-prods input:checked')].map(x => x.value);
+        const name = cats.find(x => x.toLowerCase() === v.toLowerCase()) || v;
+        if (!cats.includes(name)) await saveSettings({ productCategories: [...cats, name] }, true);
+        g('#cd-cat-new').value = ''; g('#cd-cat-add').hidden = true; drawProds([...have, name]);
+      };
+      g('#cd-cat-ok').onclick = addCat;
+      g('#cd-cat-new').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addCat(); } };
+      // ticking Prospect switches the cadence to prospect follow-ups; unticking puts back your default
+      g('#cd-prospect').onchange = () => {
+        const p = g('#cd-prospect').checked;
+        g('#cd-cad').value = p ? (+set().prospectCadence || 2) : set().defaultCadence; g('#cd-unit').value = p ? 'weeks' : set().defaultUnit;
+      };
+      const cv = g('#cd-convert'); if (cv) cv.onclick = () => { g('#cd-prospect').checked = false; g('#cd-prospect').onchange(); g('#cd-save').click(); };
       g('#cd-save').onclick = async () => {
         const d = read(); if (!d.name) { toast('Add a name.'); return; }
         if (!needDb()) return;
         close();
+        if (d.prospect && (isNew || !c.prospect)) d.prospectSince = today();
+        if (d.competitor && !competitorNames().some(n => n.toLowerCase() === d.competitor.toLowerCase())) await saveSettings({ competitors: [...(set().competitors || []), d.competitor] }, true);
         if (isNew) { const id = uid(); if (await guard(cRef(id).set({ ...d, lastTouch: '', createdAt: Date.now() }), 'Customer added.')) S.customers.set(id, { id, ...d }); }
         else if (await guard(cRef(c.id).update(d), 'Saved.')) S.customers.set(c.id, { ...c, ...d });
         render();
@@ -867,14 +916,18 @@ function exportWeek() {
   offerFile(`cadence-week-${ws}.csv`, lines.join('\r\n'));
 }
 function exportCustomers() {
-  const head = ['Name', 'Customer ID', 'Contact', 'Phone', 'Email', 'Address', 'Type', 'Cadence', 'Unit', 'Day', 'Preferred time', 'Last touch', 'Last on-rhythm date', 'Next due', 'Active', 'Notes'];
-  const lines = [head.join(',')].concat([...S.customers.values()].sort((a, b) => custName(a).localeCompare(custName(b))).map(c => [c.name, c.custId, c.contact, c.phone, c.email, c.address, KINDS[c.kind || 'visit'], c.cadence, c.unit || 'weeks', hasHome(c) ? DAYS_LONG[+c.homeDay] : '', c.preferredTime, c.lastTouch, c.rhythmDate, dueDate(c) || '', c.active === false ? 'No' : 'Yes', c.notes].map(csvCell).join(',')));
+  const head = ['Name', 'Customer ID', 'Prospect', 'Assigned', 'Currently buying', 'Competitor brand', 'Contact', 'Phone', 'Email', 'Address', 'Type', 'Cadence', 'Unit', 'Day', 'Preferred time', 'Last touch', 'Last on-rhythm date', 'Next due', 'Active', 'Notes'];
+  const lines = [head.join(',')].concat([...S.customers.values()].sort((a, b) => custName(a).localeCompare(custName(b))).map(c => [c.name, c.custId, c.prospect ? 'Yes' : 'No', c.assigned ? 'Yes' : 'No', (c.products || []).join('; '), c.competitor, c.contact, c.phone, c.email, c.address, KINDS[c.kind || 'visit'], c.cadence, c.unit || 'weeks', hasHome(c) ? DAYS_LONG[+c.homeDay] : '', c.preferredTime, c.lastTouch, c.rhythmDate, dueDate(c) || '', c.active === false ? 'No' : 'Yes', c.notes].map(csvCell).join(',')));
   offerFile(`customers-${today()}.csv`, lines.join('\r\n'));
 }
 
 /* ============ import ============ */
 const IMPORT_FIELDS = [
   ['custId', 'Customer ID', ['customer id', 'cust id', 'customer #', 'cust #', 'customer number', 'customer no', 'account id', 'account number', 'account #', 'acct', 'id']],
+  ['prospect', 'Prospect (yes/no)', ['prospect', 'stage']],
+  ['assigned', 'Assigned account (yes/no)', ['assigned', 'assigned account']],
+  ['products', 'Currently buying', ['currently buying', 'products', 'buying', 'product lines', 'categories']],
+  ['competitor', 'Competitor brand', ['competitor', 'competitor brand', 'competition']],
   ['email', 'Email', ['email', 'e-mail']],
   ['phone', 'Phone', ['phone', 'mobile', 'cell', 'tel']],
   ['contact', 'Contact person', ['contact', 'first name', 'person', 'buyer', 'owner']],
@@ -912,6 +965,8 @@ function guessMap(headers) {
   }
   return map;
 }
+function normYes(v) { return /^(y|yes|true|1|x|✓|prospect|assigned)/i.test(String(v || '').trim()); }
+function normProducts(v) { const cats = set().productCategories || []; return [...new Set(String(v).split(/[;,|\n]/).map(x => x.trim()).filter(Boolean).map(x => cats.find(k => k.toLowerCase() === x.toLowerCase()) || x))]; }
 function normKind(v) { v = String(v || '').toLowerCase(); if (!v) return null; if (/e-?mail/.test(v)) return 'email'; if (/text|sms/.test(v)) return 'text'; if (/call|phone/.test(v)) return 'call'; if (/visit|in.?person|onsite|on-site|f2f|face/.test(v)) return 'visit'; return null; }
 function normCadence(v) { v = String(v || '').toLowerCase(); const n = parseFloat(v); if (!n) return null; return { cadence: Math.round(n), unit: /day|\bd\b/.test(v) ? 'days' : 'weeks' }; }
 function normDay(v) { v = String(v || '').toLowerCase().trim(); if (!v) return ''; const i = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].findIndex(d => v.startsWith(d)); return i >= 1 && i <= 5 ? i : ''; }
@@ -966,11 +1021,15 @@ function importDialog() {
         const val = (r, f) => map[f] >= 0 ? String(r[map[f]] ?? '').trim() : '';
         return rows.map(r => {
           const name = val(r, 'name') || val(r, 'contact'); if (!name) return null;
-          const cad = normCadence(val(r, 'cadence')) || { cadence: dc, unit: du };
+          const prospect = map.prospect >= 0 ? normYes(val(r, 'prospect')) : undefined;
+          const cad = normCadence(val(r, 'cadence')) || (prospect ? { cadence: +set().prospectCadence || 2, unit: 'weeks' } : { cadence: dc, unit: du });
           const last = normDate(val(r, 'lastTouch'));
           let home = normDay(val(r, 'homeDay'));
           if (home === '' && last && cad.unit === 'weeks') { const w = dow(last); if (w >= 1 && w <= 5) home = w; }
-          return { name, custId: val(r, 'custId'), contact: val(r, 'contact') !== name ? val(r, 'contact') : '', phone: val(r, 'phone'), email: val(r, 'email'), address: val(r, 'address'), kind: normKind(val(r, 'kind')) || dk, ...cad, homeDay: home, lastTouch: last, rhythmDate: last, notes: val(r, 'notes') };
+          return { name, custId: val(r, 'custId'), contact: val(r, 'contact') !== name ? val(r, 'contact') : '', phone: val(r, 'phone'), email: val(r, 'email'), address: val(r, 'address'), kind: normKind(val(r, 'kind')) || dk, ...cad, homeDay: home, lastTouch: last, rhythmDate: last, notes: val(r, 'notes'), competitor: val(r, 'competitor'),
+            // only set flags and products when that column was matched, so an update doesn't wipe them
+            ...(prospect !== undefined ? { prospect } : {}), ...(map.assigned >= 0 ? { assigned: normYes(val(r, 'assigned')) } : {}),
+            ...(val(r, 'products') ? { products: normProducts(val(r, 'products')) } : {}) };
         }).filter(Boolean);
       }
       function preview() {
@@ -983,6 +1042,8 @@ function importDialog() {
       g('#im-go').onclick = async () => {
         if (!needDb()) return;
         const b = build(), upd = g('#im-up').checked;
+        const newCats = [...new Set(b.flatMap(c => c.products || []))].filter(x => !(set().productCategories || []).includes(x));
+        if (newCats.length) await saveSettings({ productCategories: [...(set().productCategories || []), ...newCats] }, true);
         const byName = new Map([...S.customers.values()].map(c => [custName(c).toLowerCase(), c]));
         const byId = new Map([...S.customers.values()].filter(c => c.custId).map(c => [String(c.custId).toLowerCase(), c]));
         g('#im-go').disabled = true;
@@ -1054,6 +1115,7 @@ $('#main').addEventListener('click', async e => {
     case 'open-cust': { const c = S.customers.get(id); if (c) customerDialog(c); break; }
     case 'new-cust': customerDialog(null); break;
     case 'import': importDialog(); break;
+    case 'cat-del': await saveSettings({ productCategories: (set().productCategories || []).filter(p => p !== t.dataset.v) }); render(); break;
     case 'cfilter': S.filter = t.dataset.f; render(); break;
     case 'csort': S.sort = t.dataset.s; render(); break;
     case 'plan-one': { const c = S.customers.get(id); const sel = document.getElementById('pd-' + id); if (c) await planAdd([{ c, due: dueDate(c), day: sel ? sel.value : suggestDay(c, S.planWeek, dueDate(c)) }]); break; }
