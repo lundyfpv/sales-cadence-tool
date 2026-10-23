@@ -322,3 +322,17 @@ a.btn.primary { color: var(--accent-ink); }
 .pill.prospect { background: var(--g-prospect-soft); color: var(--g-prospect); }
 .pill.assigned { background: var(--g-assigned-soft); color: var(--g-assigned); }
 #cd-prods .btn { padding: 2px 10px; font-weight: 700; }
+
+/* fixed-width titles so the arrows don't shift as you page through months and weeks */
+.toolbar h2.mtitle { min-width: 9.8em; }
+.toolbar h2.wtitle { min-width: 8.8em; }
+/* today */
+.dh.today { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); box-shadow: inset 0 3px 0 var(--accent); }
+.col.today, .allday.today { background-color: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.mc.today { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); box-shadow: inset 0 0 0 2px var(--accent); }
+.mc.today .n { color: var(--accent); }
+.mc.today .n::after { content: "Today"; margin-left: 6px; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; }
+.aday.today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.aday.today .aday-h { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.aday.today .aday-h .dnum { background: var(--accent); color: var(--accent-ink); border-radius: 6px; padding: 0 6px; }
+@media (max-width: 760px) { .mc.today .n::after { display: none; } }
