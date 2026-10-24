@@ -39,6 +39,7 @@ addColumn('users', 'name', 'TEXT');
 addColumn('users', 'manager_id', 'TEXT');
 addColumn('users', 'active', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('users', 'is_admin', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('users', 'photo', 'INTEGER'); // when the profile photo was last set (also busts caches); null = none
 addColumn('docs', 'owner', 'TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS docs_owner ON docs(owner)');
 

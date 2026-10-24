@@ -84,7 +84,8 @@ const q = {
   byName: store.db.prepare('SELECT * FROM users WHERE username = ?'),
   byId: store.db.prepare('SELECT * FROM users WHERE id = ?'),
   add: store.db.prepare('INSERT INTO users (id, username, pass, role, created, name, manager_id, active, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)'),
-  all: store.db.prepare('SELECT id, username, name, role, manager_id, active, is_admin, created, totp IS NOT NULL AS totp FROM users ORDER BY created'),
+  all: store.db.prepare('SELECT id, username, name, role, manager_id, active, is_admin, photo, created, totp IS NOT NULL AS totp FROM users ORDER BY created'),
+  setPhoto: store.db.prepare('UPDATE users SET photo = ? WHERE id = ?'),
   update: store.db.prepare('UPDATE users SET name = ?, role = ?, manager_id = ?, active = ?, is_admin = ? WHERE id = ?'),
   firstAdmin: store.db.prepare("SELECT id FROM users WHERE is_admin = 1 OR role = 'admin' ORDER BY created LIMIT 1"),
   activeAdmins: store.db.prepare("SELECT COUNT(*) AS n FROM users WHERE (is_admin = 1 OR role = 'admin') AND active = 1"),
@@ -94,7 +95,7 @@ const q = {
   setPass: store.db.prepare('UPDATE users SET pass = ? WHERE id = ?'),
   setTotp: store.db.prepare('UPDATE users SET totp = ? WHERE id = ?'),
   sAdd: store.db.prepare('INSERT INTO sessions (token, user_id, created, expires, ua, ip) VALUES (?, ?, ?, ?, ?, ?)'),
-  sGet: store.db.prepare('SELECT s.token, s.expires, u.id, u.username, u.name, u.role, u.manager_id, u.active, u.is_admin, u.totp FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?'),
+  sGet: store.db.prepare('SELECT s.token, s.expires, u.id, u.username, u.name, u.role, u.manager_id, u.active, u.is_admin, u.photo, u.totp FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?'),
   sTouch: store.db.prepare('UPDATE sessions SET expires = ? WHERE token = ?'),
   sDel: store.db.prepare('DELETE FROM sessions WHERE token = ?'),
   sDelUser: store.db.prepare('DELETE FROM sessions WHERE user_id = ? AND token != ?'),
@@ -117,7 +118,7 @@ const ROLES = { admin: 'Global admin', director: 'Sales director', rsm: 'Regiona
 const RANK = { tsm: 1, rsm: 2, director: 3, admin: 4 };
 const rank = role => RANK[role] || 0;
 const isAdmin = u => !!u && (u.role === 'admin' || !!u.is_admin || u.admin === true);
-const publicUser = u => ({ id: u.id, username: u.username, name: u.name || '', role: u.role, admin: isAdmin(u), manager: u.manager_id || null, active: !!u.active, totp: !!u.totp });
+const publicUser = u => ({ id: u.id, username: u.username, name: u.name || '', role: u.role, admin: isAdmin(u), manager: u.manager_id || null, active: !!u.active, totp: !!u.totp, photo: u.photo || null });
 function allUsers() { return q.all.all(); }
 // Everyone below a user in the chain (reports, their reports, and so on)
 function descendants(id, users = allUsers()) {
@@ -147,7 +148,7 @@ function sessionFrom(req) {
   // slide the expiry at most once a day
   const fresh = Date.now() + SESSION_DAYS * 864e5;
   if (fresh - row.expires > 864e5) q.sTouch.run(fresh, row.token);
-  return { tokenHash: row.token, user: { id: row.id, username: row.username, name: row.name || '', role: row.role, admin: isAdmin(row), manager: row.manager_id || null, totp: !!row.totp } };
+  return { tokenHash: row.token, user: { id: row.id, username: row.username, name: row.name || '', role: row.role, admin: isAdmin(row), manager: row.manager_id || null, totp: !!row.totp, photo: row.photo || null } };
 }
 function cookieHeader(token, secure, clear) {
   const parts = [`${COOKIE}=${clear ? '' : token}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${clear ? 0 : SESSION_DAYS * 86400}`];

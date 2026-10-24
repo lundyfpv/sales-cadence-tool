@@ -361,3 +361,9 @@ a.btn.primary { color: var(--accent-ink); }
 /* whose customers and calendar are showing (managers) */
 .viewas { width: auto; max-width: 220px; padding: 5px 8px; font-size: .85rem; }
 @media (max-width: 760px) { .viewas { order: 2; max-width: 50vw; } }
+
+/* profile photos */
+.avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex: none; display: inline-grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: .78rem; }
+.avatar.lg { width: 72px; height: 72px; font-size: 1.4rem; }
+.menu-btn:has(img.avatar) { padding: 0; overflow: hidden; }
+.menu-btn img.avatar { width: 100%; height: 100%; }

@@ -24,6 +24,17 @@
 <main class="admin gut">
   <h2 style="font-size:1.6rem">Admin</h2>
 
+  <section class="panel" id="profile">
+    <h3>Your profile</h3>
+    <div class="row" style="gap:14px;align-items:center">
+      <span id="pf-av"></span>
+      <div style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:8px">
+        <div class="row"><input class="inp" id="pf-name" placeholder="Your name" style="max-width:260px"><button class="btn" id="pf-save">Save name</button></div>
+        <div class="row"><label class="btn" for="pf-file">Upload photo</label><input type="file" id="pf-file" accept="image/*" hidden><button class="btn" id="pf-del" hidden>Remove photo</button><span class="muted small" id="pf-msg"></span></div>
+      </div>
+    </div>
+  </section>
+
   <section class="panel" id="people" hidden>
     <div class="row"><h3>People</h3><span class="spacer"></span><button class="btn primary" id="u-new">+ Add person</button></div>
     <p class="muted small" style="margin:0">Global admin → Sales director → Regional sales manager → Territory sales manager. Each person sees their own customers and calendar plus everyone below them. You can manage people below you in your chain.</p>

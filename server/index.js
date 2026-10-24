@@ -400,6 +400,38 @@ async function handle(req, res) {
       store.bump();
       return send(res, 200, { ok: true, id });
     }
+    // Profile photos: anyone signed in can see them; you can set your own, and managers can set photos for the people they manage.
+    // The browser crops and shrinks them first, so they're small JPEG/PNG/WebP files kept in uploads/.
+    m = p.match(/^\/api\/users\/([0-9a-f-]{36})\/photo$/);
+    if (m) {
+      const target = users.find(u => u.id === m[1]);
+      if (!target) return fail(res, 404, 'Not found');
+      const file = path.join(store.UPLOAD_DIR, 'avatar-' + target.id);
+      if (req.method === 'GET') {
+        if (!target.photo || !fs.existsSync(file)) return fail(res, 404, 'No photo.');
+        const mime = fs.existsSync(file + '.type') ? fs.readFileSync(file + '.type', 'utf8') : 'image/jpeg';
+        res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'private, max-age=31536000', 'Content-Security-Policy': "default-src 'none'; sandbox" });
+        return fs.createReadStream(file).pipe(res);
+      }
+      if (target.id !== user.id && !auth.canManage(user, target, users)) throw forbidden();
+      if (req.method === 'DELETE') {
+        for (const f of [file, file + '.type']) try { fs.unlinkSync(f); } catch {}
+        auth.q.setPhoto.run(null, target.id); store.bump(); return send(res, 200, { ok: true });
+      }
+      if (req.method === 'POST') {
+        const mime = String(req.headers['content-type'] || '');
+        if (!/^image\/(jpeg|png|webp)$/.test(mime)) return fail(res, 400, 'Use a JPEG, PNG or WebP image.');
+        const buf = await new Promise((resolve, reject) => {
+          const chunks = []; let size = 0;
+          req.on('data', c => { size += c.length; if (size > 2 * 1048576) { reject(Object.assign(new Error('That photo is too large.'), { status: 413 })); req.destroy(); } else chunks.push(c); });
+          req.on('end', () => resolve(Buffer.concat(chunks))); req.on('error', reject);
+        });
+        if (!buf.length) return fail(res, 400, 'No photo received.');
+        fs.writeFileSync(file, buf, { mode: 0o600 }); fs.writeFileSync(file + '.type', mime, { mode: 0o600 });
+        const v = Date.now(); auth.q.setPhoto.run(v, target.id); store.bump();
+        return send(res, 200, { ok: true, photo: v });
+      }
+    }
     m = p.match(/^\/api\/users\/([0-9a-f-]{36})(\/password)?$/);
     if (m) {
       const target = users.find(u => u.id === m[1]);
