@@ -19,7 +19,8 @@
     const s = await api('GET', '/api/admin/status');
     loadPeople();
     // HTTPS and backups are for admins; everyone else gets their own sign-in settings
-    $('https').hidden = $('backup').hidden = !!s.limited;
+    $('https').hidden = $('backup').hidden = $('brand').hidden = !!s.limited;
+    if (!s.limited) { $('br-reset').hidden = !s.brand; $('br-now').src = '/icons/icon-192.png?t=' + Date.now(); }
     if (s.limited) { $('s-user').textContent = s.username; $('s-sess').textContent = s.sessions; $('s-totp').textContent = s.totp ? 'On' : 'Off'; drawTotp(s.totp); return; }
     $('p-http').textContent = s.ports.http; $('p-https').textContent = s.ports.https;
     const c = s.cert, pill = $('cert-pill');
@@ -86,6 +87,38 @@
   };
   $('b-cancel').onclick = () => { pending = null; $('b-confirm').hidden = true; $('b-file').value = ''; };
   $('b-go').onclick = async () => { try { const r = await api('POST', '/api/admin/restore', pending); $('b-msg').textContent = `Restored ${r.customers} customers and ${r.appointments} appointments.`; } catch (e) { $('b-msg').textContent = e.message; } $('b-confirm').hidden = true; pending = null; load(); };
+
+  /* ---- company logo ----
+     Every icon is drawn here from the uploaded image: transparent ones for the header, tab and "any" icons, and ones on a
+     solid background for Android (maskable: the logo kept inside the middle 80% that survives a circle crop) and iPhone. */
+  async function makeIcons(file, bg) {
+    const url = URL.createObjectURL(file);
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('That image couldn\'t be read.')); i.src = url; });
+    const w = img.naturalWidth || 512, h = img.naturalHeight || 512;
+    const draw = (size, fill, scale) => new Promise(res => {
+      const c = document.createElement('canvas'); c.width = c.height = size; const x = c.getContext('2d');
+      if (fill) { x.fillStyle = fill; x.fillRect(0, 0, size, size); }
+      const box = size * scale, k = Math.min(box / w, box / h), dw = w * k, dh = h * k;
+      x.imageSmoothingQuality = 'high'; x.drawImage(img, (size - dw) / 2, (size - dh) / 2, dw, dh);
+      c.toBlob(res, 'image/png');
+    });
+    const out = { 'icon-192.png': await draw(192, null, 1), 'icon-512.png': await draw(512, null, 1), 'favicon-64.png': await draw(64, null, 1),
+      'maskable-512.png': await draw(512, bg, 0.78), 'apple-touch-icon.png': await draw(180, bg, 0.86) };
+    URL.revokeObjectURL(url); return out;
+  }
+  $('br-file').onchange = async () => {
+    const f = $('br-file').files[0]; if (!f) return; $('br-msg').textContent = 'Making icons…';
+    try {
+      const icons = await makeIcons(f, $('br-bg').value);
+      for (const [name, blob] of Object.entries(icons)) {
+        const r = await fetch('/api/admin/brand?file=' + name, { method: 'POST', headers: { 'X-CB': '1', 'Content-Type': 'image/png' }, body: blob });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Upload failed.');
+      }
+      $('br-msg').textContent = 'Logo updated. Reinstall the app on your phone to refresh its home-screen icon.'; load();
+    } catch (e) { $('br-msg').textContent = e.message; }
+    $('br-file').value = '';
+  };
+  $('br-reset').onclick = async () => { try { await api('DELETE', '/api/admin/brand'); $('br-msg').textContent = 'Back to the default logo.'; load(); } catch (e) { toast(e.message); } };
 
   /* ---- profile photos ---- */
   const initials = u => (u.name || u.username || '?').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();

@@ -104,6 +104,17 @@ function notifyMentions(author, apptId) {
     }
   }
 }
+/* ---------- company logo ---------- */
+// An admin can upload their company's logo. It's kept in DATA_DIR/brand (never in the public repo) and served in place of
+// the built-in icons, so the header, sign-in page, tab and home-screen icons all switch; deleting it restores the defaults.
+const BRAND_DIR = path.join(store.DATA_DIR, 'brand');
+const BRAND_FILES = { '/icons/icon-192.png': 'icon-192.png', '/icons/icon-512.png': 'icon-512.png', '/icons/maskable-512.png': 'maskable-512.png', '/icons/apple-touch-icon.png': 'apple-touch-icon.png', '/icons/icon.svg': 'favicon-64.png' };
+function serveBrand(req, res, file) {
+  const st = fs.statSync(file), etag = `"b${st.mtimeMs.toString(36)}"`;
+  const headers = { 'Content-Type': 'image/png', ETag: etag, 'Cache-Control': 'no-cache' };
+  if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); return res.end(); }
+  res.writeHead(200, { ...headers, 'Content-Length': st.size }); fs.createReadStream(file).pipe(res);
+}
 const apptVisible = (owners, apptId) => { const o = store.docOwner('appointments', apptId); return o !== undefined && owners.includes(o); };
 
 /* ---------- static files ---------- */
@@ -114,7 +125,7 @@ function serveStatic(req, res, rel) {
     if (err || !st.isFile()) return fail(res, 404, 'Not found');
     const ext = path.extname(file).toLowerCase();
     const etag = `"${st.size.toString(36)}-${st.mtimeMs.toString(36)}"`;
-    const headers = { 'Content-Type': TYPES[ext] || 'application/octet-stream', ETag: etag, 'Cache-Control': ['.png', '.woff2', '.ico'].includes(ext) ? 'public, max-age=604800' : 'no-cache' };
+    const headers = { 'Content-Type': TYPES[ext] || 'application/octet-stream', ETag: etag, 'Cache-Control': ['.png', '.woff2', '.ico'].includes(ext) && !rel.startsWith('/icons/') ? 'public, max-age=604800' : 'no-cache' };
     if (ext === '.html') headers['Content-Security-Policy'] = CSP;
     if (rel === '/sw.js') headers['Service-Worker-Allowed'] = '/';
     if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); return res.end(); }
@@ -183,6 +194,7 @@ async function handle(req, res) {
     if (p === '/login') return session ? redirect(res, '/') : serveStatic(req, res, '/login.html');
     if (p === '/admin') return session ? serveStatic(req, res, '/admin.html') : redirect(res, '/login');
     if (p === '/app.html' || p === '/admin.html') return redirect(res, '/');
+    if (BRAND_FILES[p] && fs.existsSync(path.join(BRAND_DIR, BRAND_FILES[p]))) return serveBrand(req, res, path.join(BRAND_DIR, BRAND_FILES[p]));
     if (!p.startsWith('/api/')) return serveStatic(req, res, p);
   }
 
@@ -333,6 +345,7 @@ async function handle(req, res) {
         acme: store.kvGet('acme', {}), cert: acme.certInfo(), httpsListening: !!httpsServer, ports: { http: HTTP_PORT, https: HTTPS_PORT },
         job: { running: job.running, log: job.log, error: job.error, finished: job.finished },
         sessions: auth.q.sCount.get(user.id, Date.now()).n, totp: user.totp, username: user.username,
+        brand: fs.existsSync(path.join(BRAND_DIR, 'icon-512.png')),
       });
     }
     if (p === '/api/admin/acme' && req.method === 'POST') {
@@ -391,6 +404,25 @@ async function handle(req, res) {
       return send(res, 200, { ok: true });
     }
     if (p === '/api/admin/logout-others' && req.method === 'POST') { auth.q.sDelUser.run(user.id, session.tokenHash); return send(res, 200, { ok: true }); }
+    // company logo: the browser makes each icon size and uploads them one at a time
+    if (p === '/api/admin/brand' && req.method === 'POST') {
+      adminOnly();
+      const name = url.searchParams.get('file');
+      if (!Object.values(BRAND_FILES).includes(name)) return fail(res, 400, 'Unknown icon file.');
+      if (req.headers['content-type'] !== 'image/png') return fail(res, 400, 'Icons must be PNG.');
+      const buf = await new Promise((resolve, reject) => { const chunks = []; let n = 0;
+        req.on('data', c => { n += c.length; if (n > 3 * 1048576) { reject(Object.assign(new Error('That image is too large.'), { status: 413 })); req.destroy(); } else chunks.push(c); });
+        req.on('end', () => resolve(Buffer.concat(chunks))); req.on('error', reject); });
+      if (buf.length < 8 || buf.readUInt32BE(0) !== 0x89504e47) return fail(res, 400, 'That isn\'t a PNG image.');
+      fs.mkdirSync(BRAND_DIR, { recursive: true });
+      fs.writeFileSync(path.join(BRAND_DIR, name), buf, { mode: 0o644 });
+      return send(res, 200, { ok: true });
+    }
+    if (p === '/api/admin/brand' && req.method === 'DELETE') {
+      adminOnly();
+      for (const f of Object.values(BRAND_FILES)) try { fs.unlinkSync(path.join(BRAND_DIR, f)); } catch {}
+      return send(res, 200, { ok: true });
+    }
     if (p === '/api/admin/backup' && req.method === 'GET') {
       adminOnly();
       const s = store.state(users.map(u => u.id), user.id);
