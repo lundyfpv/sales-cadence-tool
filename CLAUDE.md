@@ -3,7 +3,7 @@
 Read this before you change anything. It covers what the app does, how it's built, and how it gets deployed.
 
 ## Who uses it
-Alec, a field sales rep, uses it alone. He sees customers on a cadence (usually 3 weeks, some 5). Visits happen Tue–Thu. Mondays are office days for confirming the week's appointments, and Fridays are office days for sending recaps and planning the next week. He uses it on his phone (installed to the home screen) and his desktop.
+Alec, a field sales rep, set it up and is its admin (his account is TSM + Admin). Other people can have accounts under a sales hierarchy (see Accounts below). He sees customers on a cadence (usually 3 weeks, some 5). Visits happen Tue–Thu. Mondays are office days for confirming the week's appointments, and Fridays are office days for sending recaps and planning the next week. He uses it on his phone (installed to the home screen) and his desktop.
 
 ## Deployment
 - Runs on Alec's TrueNAS SCALE as a Custom App (Install via YAML), using the image `ghcr.io/lundyfpv/sales-cadence-tool:latest`.
@@ -26,10 +26,18 @@ Alec, a field sales rep, uses it alone. He sees customers on a cadence (usually 
 - `public/app.js`: the whole planner UI. Writes go through `S.db.collection(...).doc(id).set/update/delete`, a shim over `/api/docs/:coll/:id`. Live updates come over SSE at `/api/events`, which makes the page re-fetch `/api/state`.
 - `public/admin.*`, `public/login.*`: the admin and login pages. `theme.js` applies light/dark mode and the accent color before first paint.
 
+## Accounts
+- `users` rows: role (admin|director|rsm|tsm, ranked in that order), is_admin (admin permission on top of any role), manager_id (reports to; must outrank them), name, active.
+- Each person sees their own records plus everyone below them in the chain; an admin sees everyone (`auth.visibleOwners`). Every docs/batch/files request is checked against that list in `writeDoc` / `apptVisible` (server/index.js). Never return or write a record without that check.
+- Managing people (`/api/users`): an admin manages anyone but themselves; others manage people below them in their chain who have a lower role and are not admins (`auth.canManage`, `roleProblem`). Only admins grant Admin, and at least one active admin must remain.
+- The client loads everything it may see (`S.raw`) and narrows it with the **Viewing** picker (`applyView`). Writes made while viewing someone send `?owner=` so new customers belong to them.
+
 ## Data model
+- `docs.owner` is the user id each customer and appointment belongs to. New appointments take their customer's owner.
 - **customers**: name, custId (the customer's own ID, free text), prospect (bool), prospectSince (date it became a prospect), assigned (bool, assigned account), products (array of category names they currently buy), competitors (array of competitor equipment brands; older records may still have a single `competitor` string, read as a one-item list), distributors (array of current distributors), contact, phone, email, address, kind (visit|call|email|text), cadence, unit (weeks|days), homeDay (0–6 or ''), preferredTime, duration, active, notes, lastTouch, rhythmDate.
 - **appointments**: customerId, name, kind, date (YYYY-MM-DD), time (HH:MM or '' = all day), duration, status (proposed|confirmed|completed|missed|cancelled), rhythmDate, notes (agenda), recap, actions ("My action items": the rep's to-dos before the next meeting, one per line; an upcoming appointment shows its own plus those from the customer's last meeting), actionsDone (texts of the items ticked off), recapSent.
-- **config/settings**: visitDays, officeDays, dayStart/End, visitLength, buffer, maxVisitsPerDay, default cadence, autoNext, blackouts[], message templates, theme {mode (system|light|dark|oled), accent}, weekStart (0 = Sunday, the default; 1 = Monday; only affects the Week and Month calendars), prospectCadence (weeks, default 2), coldAfter (follow-ups before a prospect shows "Going cold", default 4), productCategories[], competitors[], distributors[] (the master lists behind the customer checkboxes, edited in Settings or with the + on a customer), competitorsSeeded (one-time copy of old competitor values done).
+- **settings** are stored in two docs: personal ones in `config/u:<userId>`, and company-wide keys (`store.COMPANY_KEYS`: productCategories, competitors, distributors, competitorsSeeded, usHolidays) in `config/company`. The client still reads and writes one merged object at `config/settings`, and the server splits it. Company keys are only saved for admins, directors and RSMs.
+- **settings** fields: visitDays, officeDays, dayStart/End, visitLength, buffer, maxVisitsPerDay, default cadence, autoNext, blackouts[], message templates, theme {mode (system|light|dark|oled), accent}, weekStart (0 = Sunday, the default; 1 = Monday; only affects the Week and Month calendars), prospectCadence (weeks, default 2), coldAfter (follow-ups before a prospect shows "Going cold", default 4), productCategories[], competitors[], distributors[] (the master lists behind the customer checkboxes, edited in Settings or with the + on a customer), competitorsSeeded (one-time copy of old competitor values done), usHolidays (default true: show US federal holidays computed in `usHolidays()`; the major ones block like blackouts).
 - **Calendar colors** come from the customer, not the appointment type: prospects yellow, assigned accounts green, everyone else blue. Status still overrides (proposed is dashed, done is grey, missed is red).
 
 ## Cadence rules (agreed with Alec; don't change them without asking)

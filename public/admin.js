@@ -17,6 +17,10 @@
   let polling = null, filled = false;
   async function load() {
     const s = await api('GET', '/api/admin/status');
+    loadPeople();
+    // HTTPS and backups are for admins; everyone else gets their own sign-in settings
+    $('https').hidden = $('backup').hidden = !!s.limited;
+    if (s.limited) { $('s-user').textContent = s.username; $('s-sess').textContent = s.sessions; $('s-totp').textContent = s.totp ? 'On' : 'Off'; drawTotp(s.totp); return; }
     $('p-http').textContent = s.ports.http; $('p-https').textContent = s.ports.https;
     const c = s.cert, pill = $('cert-pill');
     if (c && !c.error) {
@@ -82,6 +86,77 @@
   };
   $('b-cancel').onclick = () => { pending = null; $('b-confirm').hidden = true; $('b-file').value = ''; };
   $('b-go').onclick = async () => { try { const r = await api('POST', '/api/admin/restore', pending); $('b-msg').textContent = `Restored ${r.customers} customers and ${r.appointments} appointments.`; } catch (e) { $('b-msg').textContent = e.message; } $('b-confirm').hidden = true; pending = null; load(); };
+
+  /* ---- people ---- */
+  const RANK = { tsm: 1, rsm: 2, director: 3, admin: 4 };
+  let P = null;
+  const nm = u => u ? (u.name || u.username) : '';
+  const roleText = u => P.roles[u.role] + (u.admin && u.role !== 'admin' ? ' + Admin' : '');
+  async function loadPeople() {
+    P = await api('GET', '/api/users');
+    const me = P.users.find(u => u.id === P.me);
+    P.meUser = me;
+    $('people').hidden = !(me.admin || RANK[me.role] >= RANK.rsm);
+    if ($('people').hidden) return;
+    const all = [...P.users, ...P.managers.filter(m => !P.users.some(u => u.id === m.id))];
+    const byId = id => all.find(u => u.id === id);
+    $('u-list').innerHTML = P.users.slice().sort((a, b) => RANK[b.role] - RANK[a.role] || nm(a).localeCompare(nm(b))).map(u => `<div class="li" style="flex-wrap:wrap">
+      <div class="grow"><b>${esc(nm(u))}</b>${u.id === P.me ? ' <span class="pill">you</span>' : ''}${u.active ? '' : ' <span class="pill bad">Turned off</span>'}
+        <div class="muted small">${esc(roleText(u))} · @${esc(u.username)}${u.manager ? ' · reports to ' + esc(nm(byId(u.manager)) || 'someone outside your team') : ''}${u.totp ? ' · two-step on' : ''}</div></div>
+      ${u.id === P.me ? '<button class="btn sm" id="u-myname">Change my name</button>' : ''}${u.canManage ? `<button class="btn sm" data-edit="${u.id}">Edit</button><button class="btn sm" data-pw="${u.id}">Reset password</button><button class="btn sm ${u.active ? 'danger' : ''}" data-act="${u.id}" data-on="${u.active ? 0 : 1}">${u.active ? 'Turn off' : 'Turn on'}</button>` : ''}
+    </div>`).join('');
+    $('u-list').querySelectorAll('[data-edit]').forEach(b => b.onclick = () => form(P.users.find(u => u.id === b.dataset.edit)));
+    const mn = $('u-myname'); if (mn) mn.onclick = () => {
+      const box = $('u-form'); box.hidden = false;
+      box.innerHTML = `<div class="note"><b>Your name</b><div class="row" style="margin-top:8px"><input class="inp" id="u-mn" value="${esc(me.name)}" style="max-width:260px"><button class="btn primary" id="u-mngo">Save</button><button class="btn" id="u-cancel">Cancel</button></div></div>`;
+      $('u-cancel').onclick = () => { box.hidden = true; };
+      $('u-mngo').onclick = async () => { try { await api('PATCH', '/api/users/' + me.id, { name: $('u-mn').value }); box.hidden = true; loadPeople(); } catch (e) { toast(e.message); } };
+    };
+    $('u-list').querySelectorAll('[data-pw]').forEach(b => b.onclick = () => resetPw(P.users.find(u => u.id === b.dataset.pw)));
+    $('u-list').querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
+      try { await api('PATCH', '/api/users/' + b.dataset.act, { active: b.dataset.on === '1' }); toast(b.dataset.on === '1' ? 'Turned on.' : 'Turned off. They\'re signed out everywhere.'); loadPeople(); } catch (e) { toast(e.message); }
+    });
+  }
+  // Add or edit a person. Roles offered are below your own (any role for an admin); "reports to" lists people who outrank the chosen role.
+  function form(u) {
+    const me = P.meUser, box = $('u-form');
+    const roles = Object.keys(P.roles).filter(r => me.admin || RANK[r] < RANK[me.role]).sort((a, b) => RANK[b] - RANK[a]);
+    box.hidden = false;
+    box.innerHTML = `<div class="note"><b>${u ? 'Edit ' + esc(nm(u)) : 'Add a person'}</b>
+      <div class="form" style="margin-top:8px">
+        <label class="fld"><span>Name</span><input id="u-name" value="${esc(u ? u.name : '')}"></label>
+        ${u ? '<span></span>' : `<label class="fld"><span>Username (for signing in)</span><input id="u-user" autocapitalize="none" autocomplete="off"></label>
+        <label class="fld"><span>Temporary password (10+ characters)</span><input id="u-pass" type="text" autocomplete="off"></label><span></span>`}
+        <label class="fld"><span>Role</span><select id="u-role">${roles.map(r => `<option value="${r}" ${u && u.role === r ? 'selected' : ''}>${esc(P.roles[r])}</option>`).join('')}</select></label>
+        <label class="fld"><span>Reports to</span><select id="u-mgr"></select></label>
+        ${me.admin ? `<label class="cb full"><input type="checkbox" id="u-admin" ${u && u.admin ? 'checked' : ''}><span>Also an admin (can manage everyone and everything, like your account)</span></label>` : ''}
+      </div>
+      <div class="row" style="margin-top:8px"><button class="btn primary" id="u-save">${u ? 'Save' : 'Add person'}</button><button class="btn" id="u-cancel">Cancel</button><span class="muted small" id="u-msg"></span></div></div>`;
+    const mgrs = () => {
+      const r = $('u-role').value, keep = $('u-mgr').value || (u ? u.manager : (RANK[me.role] > RANK[r] ? me.id : ''));
+      const opts = P.managers.filter(m => RANK[m.role] > RANK[r] && (!u || m.id !== u.id));
+      $('u-mgr').innerHTML = (me.admin ? '<option value="">Nobody</option>' : '') + opts.map(m => `<option value="${m.id}" ${m.id === keep ? 'selected' : ''}>${esc(nm(m))} · ${esc(P.roles[m.role])}</option>`).join('');
+    };
+    $('u-role').onchange = mgrs; mgrs();
+    $('u-cancel').onclick = () => { box.hidden = true; };
+    $('u-save').onclick = async () => {
+      const body = { name: $('u-name').value, role: $('u-role').value, manager: $('u-mgr').value || null };
+      if ($('u-admin')) body.admin = $('u-admin').checked;
+      try {
+        if (u) await api('PATCH', '/api/users/' + u.id, body);
+        else await api('POST', '/api/users', { ...body, username: $('u-user').value, password: $('u-pass').value });
+        box.hidden = true; toast(u ? 'Saved.' : 'Added. Give them their username and temporary password.'); loadPeople();
+      } catch (e) { $('u-msg').textContent = e.message; }
+    };
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function resetPw(u) {
+    const box = $('u-form'); box.hidden = false;
+    box.innerHTML = `<div class="note"><b>New password for ${esc(nm(u))}</b><div class="row" style="margin-top:8px"><input class="inp" id="u-np" type="text" autocomplete="off" placeholder="10+ characters" style="max-width:260px"><button class="btn primary" id="u-npgo">Set password</button><button class="btn" id="u-cancel">Cancel</button><span class="muted small" id="u-msg"></span></div><p class="muted small" style="margin:6px 0 0">They're signed out everywhere and use this to sign back in.</p></div>`;
+    $('u-cancel').onclick = () => { box.hidden = true; };
+    $('u-npgo').onclick = async () => { try { await api('POST', `/api/users/${u.id}/password`, { password: $('u-np').value }); box.hidden = true; toast('Password set.'); } catch (e) { $('u-msg').textContent = e.message; } };
+  }
+  $('u-new').onclick = () => form(null);
 
   load().catch(e => toast(e.message));
 })();

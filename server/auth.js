@@ -83,11 +83,18 @@ const q = {
   count: store.db.prepare('SELECT COUNT(*) AS n FROM users'),
   byName: store.db.prepare('SELECT * FROM users WHERE username = ?'),
   byId: store.db.prepare('SELECT * FROM users WHERE id = ?'),
-  add: store.db.prepare('INSERT INTO users (id, username, pass, role, created) VALUES (?, ?, ?, ?, ?)'),
+  add: store.db.prepare('INSERT INTO users (id, username, pass, role, created, name, manager_id, active, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)'),
+  all: store.db.prepare('SELECT id, username, name, role, manager_id, active, is_admin, created, totp IS NOT NULL AS totp FROM users ORDER BY created'),
+  update: store.db.prepare('UPDATE users SET name = ?, role = ?, manager_id = ?, active = ?, is_admin = ? WHERE id = ?'),
+  firstAdmin: store.db.prepare("SELECT id FROM users WHERE is_admin = 1 OR role = 'admin' ORDER BY created LIMIT 1"),
+  activeAdmins: store.db.prepare("SELECT COUNT(*) AS n FROM users WHERE (is_admin = 1 OR role = 'admin') AND active = 1"),
+  // accounts from before roles existed were 'admin'; they become TSM + Admin (the owner works a territory too)
+  dualRole: store.db.prepare("UPDATE users SET role = 'tsm', is_admin = 1 WHERE role = 'admin'"),
+  sDelAll: store.db.prepare('DELETE FROM sessions WHERE user_id = ?'),
   setPass: store.db.prepare('UPDATE users SET pass = ? WHERE id = ?'),
   setTotp: store.db.prepare('UPDATE users SET totp = ? WHERE id = ?'),
   sAdd: store.db.prepare('INSERT INTO sessions (token, user_id, created, expires, ua, ip) VALUES (?, ?, ?, ?, ?, ?)'),
-  sGet: store.db.prepare('SELECT s.token, s.expires, u.id, u.username, u.role, u.totp FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?'),
+  sGet: store.db.prepare('SELECT s.token, s.expires, u.id, u.username, u.name, u.role, u.manager_id, u.active, u.is_admin, u.totp FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?'),
   sTouch: store.db.prepare('UPDATE sessions SET expires = ? WHERE token = ?'),
   sDel: store.db.prepare('DELETE FROM sessions WHERE token = ?'),
   sDelUser: store.db.prepare('DELETE FROM sessions WHERE user_id = ? AND token != ?'),
@@ -97,10 +104,35 @@ const q = {
 const sha = t => crypto.createHash('sha256').update(t).digest('hex'); // only hashes are stored
 
 function userCount() { return q.count.get().n; }
-function createUser(username, password, role = 'admin') {
+function createUser(username, password, role = 'tsm', name = '', managerId = null, admin = false) {
   const id = crypto.randomUUID();
-  q.add.run(id, username, hashPassword(password), role, Date.now());
+  q.add.run(id, username, hashPassword(password), role, Date.now(), name || null, managerId, admin ? 1 : 0);
   return id;
+}
+
+/* ---------- roles and the reporting chain ---------- */
+// Global admin > sales director > regional sales manager > territory sales manager. Admin is also a permission
+// that can sit on any role (is_admin): a TSM + Admin works their own territory and manages everything.
+const ROLES = { admin: 'Global admin', director: 'Sales director', rsm: 'Regional sales manager', tsm: 'Territory sales manager' };
+const RANK = { tsm: 1, rsm: 2, director: 3, admin: 4 };
+const rank = role => RANK[role] || 0;
+const isAdmin = u => !!u && (u.role === 'admin' || !!u.is_admin || u.admin === true);
+const publicUser = u => ({ id: u.id, username: u.username, name: u.name || '', role: u.role, admin: isAdmin(u), manager: u.manager_id || null, active: !!u.active, totp: !!u.totp });
+function allUsers() { return q.all.all(); }
+// Everyone below a user in the chain (reports, their reports, and so on)
+function descendants(id, users = allUsers()) {
+  const out = new Set(), walk = m => { for (const u of users) if (u.manager_id === m && !out.has(u.id)) { out.add(u.id); walk(u.id); } };
+  walk(id); return out;
+}
+// Whose customers and calendars a user can see and edit: their own and their team's; a global admin sees everyone
+function visibleOwners(user, users = allUsers()) {
+  if (isAdmin(user)) return users.map(u => u.id);
+  return [user.id, ...descendants(user.id, users)];
+}
+// A user can manage someone below them in their chain (but not an admin); an admin can manage anyone but themselves
+function canManage(actor, target, users = allUsers()) {
+  if (!target || actor.id === target.id) return false;
+  return isAdmin(actor) || (!isAdmin(target) && descendants(actor.id, users).has(target.id) && rank(actor.role) > rank(target.role));
 }
 function createSession(userId, req) {
   const token = crypto.randomBytes(32).toString('base64url');
@@ -111,11 +143,11 @@ function sessionFrom(req) {
   const m = String(req.headers.cookie || '').match(new RegExp('(?:^|;\\s*)' + COOKIE + '=([^;]+)'));
   if (!m) return null;
   const row = q.sGet.get(sha(m[1]));
-  if (!row || row.expires < Date.now()) return null;
+  if (!row || row.expires < Date.now() || !row.active) return null;
   // slide the expiry at most once a day
   const fresh = Date.now() + SESSION_DAYS * 864e5;
   if (fresh - row.expires > 864e5) q.sTouch.run(fresh, row.token);
-  return { tokenHash: row.token, user: { id: row.id, username: row.username, role: row.role, totp: !!row.totp } };
+  return { tokenHash: row.token, user: { id: row.id, username: row.username, name: row.name || '', role: row.role, admin: isAdmin(row), manager: row.manager_id || null, totp: !!row.totp } };
 }
 function cookieHeader(token, secure, clear) {
   const parts = [`${COOKIE}=${clear ? '' : token}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${clear ? 0 : SESSION_DAYS * 86400}`];
@@ -127,4 +159,5 @@ setInterval(() => q.sPurge.run(Date.now()), 6 * 3600 * 1000).unref();
 module.exports = {
   hashPassword, verifyPassword, passwordProblem, newTotpSecret, verifyTotp, totpAt,
   throttled, noteFail, noteSuccess, userCount, createUser, createSession, sessionFrom, cookieHeader, sha, q,
+  ROLES, rank, isAdmin, publicUser, allUsers, descendants, visibleOwners, canManage,
 };

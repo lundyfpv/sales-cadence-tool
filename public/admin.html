@@ -24,6 +24,13 @@
 <main class="admin gut">
   <h2 style="font-size:1.6rem">Admin</h2>
 
+  <section class="panel" id="people" hidden>
+    <div class="row"><h3>People</h3><span class="spacer"></span><button class="btn primary" id="u-new">+ Add person</button></div>
+    <p class="muted small" style="margin:0">Global admin → Sales director → Regional sales manager → Territory sales manager. Each person sees their own customers and calendar plus everyone below them. You can manage people below you in your chain.</p>
+    <div id="u-form" hidden></div>
+    <div class="list" id="u-list"></div>
+  </section>
+
   <section class="panel" id="https">
     <div class="row"><h3>HTTPS certificate</h3><span class="spacer"></span><span class="pill" id="cert-pill">Checking…</span></div>
     <dl class="kv" id="cert-info"></dl>
@@ -65,7 +72,7 @@
     <div class="row"><button class="btn" id="s-out">Sign out all other devices</button><span class="muted small" id="s-msg"></span></div>
   </section>
 
-  <section class="panel">
+  <section class="panel" id="backup">
     <h3>Backup & restore</h3>
     <p class="muted small" style="margin:0">The backup file has your customers, appointments and settings. Attached files live in the <code>/data/uploads</code> folder; to cover them too, include the app's data folder in your TrueNAS snapshot or replication schedule.</p>
     <dl class="kv" id="b-info"></dl>
