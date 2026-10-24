@@ -511,11 +511,11 @@ function weekSide(ws, days) {
       <div class="list">${stale.slice(0, 8).map(a => `<div class="li"><div class="grow"><div class="nm">${esc(apptName(a))}</div><div class="muted small">${KINDS[a.kind]} · ${nice(a.date)}</div></div><button class="btn sm" data-act="outcome" data-id="${a.id}">Log</button></div>`).join('')}</div></div>` : ''}
   </aside>`;
 }
-// Confirming the shown week's visits (Monday's job): what's left to confirm on top, confirmed ones below in one line each
+// Confirming the shown week's visits (Monday's job), in date order; confirmed ones shrink to one line
 function confirmPanel(days) {
   const t = today();
   const items = days.filter(d => d >= t).flatMap(d => apptsOn(d).filter(a => isOpen(a) && (a.kind === 'visit' || a.time)).sort((a, b) => (a.time || '') < (b.time || '') ? -1 : 1));
-  const todo = items.filter(a => a.status === 'proposed'), done = items.filter(a => a.status === 'confirmed');
+  const todo = items.filter(a => a.status === 'proposed');
   const when = a => `<div class="cf-when"><b>${DAYS[dow(a.date)]} ${toD(a.date).getDate()}</b>${a.time ? t12s(a.time) : 'Any time'}</div>`;
   const contact = c => [c.contact && esc(c.contact), c.phone && `<span class="copyable">${esc(c.phone)}</span>`, c.email && `<span class="copyable">${esc(c.email)}</span>`].filter(Boolean).map(v => `<div class="muted small cf-line">${v}</div>`).join('');
   const row = a => {
@@ -529,7 +529,7 @@ function confirmPanel(days) {
   };
   const doneRow = a => `<div class="cf-row done">${when(a)}<div class="grow"><span class="cf-check" aria-hidden="true">${ICON.check}</span><button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button></div><button class="linkbtn undo" data-act="unconfirm" data-id="${a.id}">Undo</button></div>`;
   return `<div class="panel"><div class="row"><h3>Confirm visits</h3><span class="spacer"></span>${items.length ? `<span class="pill ${todo.length ? 'warn' : 'ok'}">${todo.length ? todo.length + ' to confirm' : 'All confirmed'}</span>` : ''}</div>
-    ${items.length ? `${todo.map(row).join('')}${done.length ? `<div class="cf-sub">Confirmed · ${done.length}</div>${done.map(doneRow).join('')}` : ''}`
+    ${items.length ? items.map(a => a.status === 'confirmed' ? doneRow(a) : row(a)).join('')
       : `<div class="empty">${days[days.length - 1] < t ? 'This week is over.' : 'No visits left to confirm this week.'}</div>`}
   </div>`;
 }
