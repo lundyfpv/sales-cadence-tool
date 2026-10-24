@@ -308,10 +308,10 @@ a.btn.primary { color: var(--accent-ink); }
 .cf-acts .linkbtn { font-size: .8rem; font-weight: 500; color: var(--muted); }
 .cf-acts .linkbtn:hover { color: var(--ink); }
 .cf-acts .linkbtn.bad { color: var(--red); }
-.cf-row.done { grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; padding: 6px 0; }
-.cf-row .undo { font-size: .8rem; font-weight: 500; color: var(--muted); }
-.cf-row.done .grow { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.cf-row.done .nm { font-weight: 500; color: var(--muted); }
+.cf-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cf-head .nm { flex: 1; min-width: 0; }
+.cf-change { font-size: .8rem; font-weight: 500; color: var(--muted); flex: none; }
+.cf-row.done .cf-head .nm { color: var(--muted); }
 .cf-check { color: var(--accent); display: inline-flex; flex: none; }
 .tasks { margin: 4px 0 0; padding: 0; list-style: none; font-size: .88rem; }
 .tasks li { margin: 2px 0; }

@@ -58,7 +58,7 @@ class ApptMap extends Map {
 }
 const S = {
   db: null, dl: null, status: 'connecting', customers: new Map(), appts: new ApptMap(), settings: { ...DEFAULT_SETTINGS },
-  view: 'week', anchor: today(), monthAnchor: today(), planWeek: null,
+  view: 'week', anchor: today(), monthAnchor: today(), planWeek: null, cfOpen: new Set(),
   q: '', filter: 'all', sort: 'next', loaded: { c: false, a: false, s: false }, mobile: false, fileCounts: {}, user: null,
   raw: { customers: [], appointments: [] }, users: [], roles: {}, canEditCompany: true, viewAs: 'me', directory: [], notifications: [], custLimit: 150,
 };
@@ -511,7 +511,8 @@ function weekSide(ws, days) {
       <div class="list">${stale.slice(0, 8).map(a => `<div class="li"><div class="grow"><div class="nm">${esc(apptName(a))}</div><div class="muted small">${KINDS[a.kind]} · ${nice(a.date)}</div></div><button class="btn sm" data-act="outcome" data-id="${a.id}">Log</button></div>`).join('')}</div></div>` : ''}
   </aside>`;
 }
-// Confirming the shown week's visits (Monday's job), in date order; confirmed ones shrink to one line
+// Confirming the shown week's visits (Monday's job), in date order. Confirmed ones keep their action items but hide
+// the contact details and links until Change is tapped (S.cfOpen).
 function confirmPanel(days) {
   const t = today();
   const items = days.filter(d => d >= t).flatMap(d => apptsOn(d).filter(a => isOpen(a) && (a.kind === 'visit' || a.time)).sort((a, b) => (a.time || '') < (b.time || '') ? -1 : 1));
@@ -519,17 +520,18 @@ function confirmPanel(days) {
   const when = a => `<div class="cf-when"><b>${DAYS[dow(a.date)]} ${toD(a.date).getDate()}</b>${a.time ? t12s(a.time) : 'Any time'}</div>`;
   const contact = c => [c.contact && esc(c.contact), c.phone && `<span class="copyable">${esc(c.phone)}</span>`, c.email && `<span class="copyable">${esc(c.email)}</span>`].filter(Boolean).map(v => `<div class="muted small cf-line">${v}</div>`).join('');
   const row = a => {
-    const c = S.customers.get(a.customerId) || {};
-    return `<div class="cf-row">${when(a)}<div class="grow">
-        <button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button>
-        ${contact(c)}
+    const c = S.customers.get(a.customerId) || {}, ok = a.status === 'confirmed', open = !ok || S.cfOpen.has(a.id);
+    const links = `<button class="linkbtn" data-act="copy-confirm" data-id="${a.id}">Copy message</button>${lastMeeting(a) ? `<button class="linkbtn" data-act="prev-recap" data-id="${a.id}">Last recap</button>` : ''}<button class="linkbtn" data-act="open-appt" data-id="${a.id}">Move</button>`, cancel = `<button class="linkbtn bad" data-act="outcome" data-id="${a.id}" data-status="cancelled">Cancel</button>`;
+    return `<div class="cf-row ${ok ? 'done' : ''}">${when(a)}<div class="grow">
+        <div class="cf-head">${ok ? `<span class="cf-check" title="Confirmed">${ICON.check}</span>` : ''}<button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button>${ok ? `<button class="linkbtn cf-change" data-act="cf-change" data-id="${a.id}" aria-expanded="${open}">${open ? 'Done' : 'Change'}</button>` : ''}</div>
+        ${open ? contact(c) : ''}
         ${taskList(actionItems(a))}
-        <div class="cf-acts"><button class="btn sm primary" data-act="confirm" data-id="${a.id}">Confirm</button><button class="linkbtn" data-act="copy-confirm" data-id="${a.id}">Copy message</button>${lastMeeting(a) ? `<button class="linkbtn" data-act="prev-recap" data-id="${a.id}">Last recap</button>` : ''}<button class="linkbtn" data-act="open-appt" data-id="${a.id}">Move</button><button class="linkbtn bad" data-act="outcome" data-id="${a.id}" data-status="cancelled">Cancel</button></div>
+        ${!ok ? `<div class="cf-acts"><button class="btn sm primary" data-act="confirm" data-id="${a.id}">Confirm</button>${links}${cancel}</div>`
+          : open ? `<div class="cf-acts">${links}<button class="linkbtn" data-act="unconfirm" data-id="${a.id}">Mark unconfirmed</button>${cancel}</div>` : ''}
       </div></div>`;
   };
-  const doneRow = a => `<div class="cf-row done">${when(a)}<div class="grow"><span class="cf-check" aria-hidden="true">${ICON.check}</span><button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button></div><button class="linkbtn undo" data-act="unconfirm" data-id="${a.id}">Undo</button></div>`;
   return `<div class="panel"><div class="row"><h3>Confirm visits</h3><span class="spacer"></span>${items.length ? `<span class="pill ${todo.length ? 'warn' : 'ok'}">${todo.length ? todo.length + ' to confirm' : 'All confirmed'}</span>` : ''}</div>
-    ${items.length ? items.map(a => a.status === 'confirmed' ? doneRow(a) : row(a)).join('')
+    ${items.length ? items.map(row).join('')
       : `<div class="empty">${days[days.length - 1] < t ? 'This week is over.' : 'No visits left to confirm this week.'}</div>`}
   </div>`;
 }
@@ -1264,7 +1266,8 @@ $('#main').addEventListener('click', async e => {
     case 'outcome': if (a) outcomeDialog(a, t.dataset.status); break;
     case 'quick-done': if (a) { await setOutcome(a, 'completed'); render(); } break;
     case 'confirm': if (a && needDb()) { await guard(aRef(a.id).update({ status: 'confirmed' }), 'Confirmed.'); } break;
-    case 'unconfirm': if (a && needDb()) { await guard(aRef(a.id).update({ status: 'proposed' })); } break;
+    case 'unconfirm': if (a && needDb()) { S.cfOpen.delete(a.id); await guard(aRef(a.id).update({ status: 'proposed' })); } break;
+    case 'cf-change': if (S.cfOpen.has(t.dataset.id)) S.cfOpen.delete(t.dataset.id); else S.cfOpen.add(t.dataset.id); render(); break;
     case 'task-toggle': if (a && needDb()) {
       const done = new Set(a.actionsDone || []); if (t.checked) done.add(t.dataset.t); else done.delete(t.dataset.t);
       a.actionsDone = [...done]; render(); await guard(aRef(a.id).update({ actionsDone: a.actionsDone }));
