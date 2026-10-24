@@ -10,6 +10,8 @@ function today() { return fmt(new Date()); }
 function mondayOf(s) { const w = dow(s); return addDays(s, w === 0 ? -6 : 1 - w); }
 // calendar weeks start on Sunday unless the user picks Monday; planning weeks stay Monday-based
 function weekStartOf(s) { const st = +S.settings.weekStart === 1 ? 1 : 0; return addDays(s, -((dow(s) - st + 7) % 7)); }
+// the week the Week view shows for a date: with weekends hidden, Sunday already belongs to the coming week (matters for Monday starts)
+function shownWeekOf(s) { return weekStartOf(dow(s) === 0 && !S.settings.showWeekend ? addDays(s, 1) : s); }
 function diffDays(a, b) { return Math.round((toD(b) - toD(a)) / 86400000); }
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -56,7 +58,7 @@ class ApptMap extends Map {
 }
 const S = {
   db: null, dl: null, status: 'connecting', customers: new Map(), appts: new ApptMap(), settings: { ...DEFAULT_SETTINGS },
-  view: 'week', anchor: today(), monthAnchor: today(), planWeek: null,
+  view: 'week', anchor: today(), monthAnchor: today(), planWeek: null, cfOpen: new Set(),
   q: '', filter: 'all', sort: 'next', loaded: { c: false, a: false, s: false }, mobile: false, fileCounts: {}, user: null,
   raw: { customers: [], appointments: [] }, users: [], roles: {}, canEditCompany: true, viewAs: 'me', directory: [], notifications: [], custLimit: 150,
 };
@@ -416,8 +418,8 @@ function chip(a, extra = '') {
 function weekDays(start) { if (!S.settings.showWeekend) start = mondayOf(addDays(start, 1)); const n = S.settings.showWeekend ? 7 : 5; return Array.from({ length: n }, (_, i) => addDays(start, i)); }
 function apptsOn(date) { return apptsDated(date).filter(a => a.status !== 'cancelled'); }
 function viewWeek() {
-  const ws = weekStartOf(S.anchor), days = weekDays(ws), t = today();
-  const thisW = weekStartOf(t), nextW = addDays(thisW, 7);
+  const ws = shownWeekOf(S.anchor), days = weekDays(ws), t = today();
+  const thisW = shownWeekOf(t), nextW = addDays(thisW, 7);
   const label = `${toD(days[0]).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${toD(days[days.length - 1]).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
   const tb = `<div class="toolbar">
     <h2 class="wtitle">${ws === thisW ? 'This week' : ws === nextW ? 'Next week' : 'Week of ' + niceShort(ws)}</h2>
@@ -509,25 +511,28 @@ function weekSide(ws, days) {
       <div class="list">${stale.slice(0, 8).map(a => `<div class="li"><div class="grow"><div class="nm">${esc(apptName(a))}</div><div class="muted small">${KINDS[a.kind]} · ${nice(a.date)}</div></div><button class="btn sm" data-act="outcome" data-id="${a.id}">Log</button></div>`).join('')}</div></div>` : ''}
   </aside>`;
 }
-// Confirming the shown week's visits (Monday's job): contact details, the message to copy, and Confirmed / Move / Cancel
+// Confirming the shown week's visits (Monday's job), in date order. Confirmed ones keep their action items but hide
+// the contact details and links until Change is tapped (S.cfOpen).
 function confirmPanel(days) {
   const t = today();
   const items = days.filter(d => d >= t).flatMap(d => apptsOn(d).filter(a => isOpen(a) && (a.kind === 'visit' || a.time)).sort((a, b) => (a.time || '') < (b.time || '') ? -1 : 1));
-  const conf = items.filter(a => a.status === 'confirmed').length;
-  let lastDay = '';
-  return `<div class="panel"><div class="row"><h3>Confirm visits</h3><span class="spacer"></span>${items.length ? `<span class="pill ${conf === items.length ? 'ok' : 'warn'}">${conf} of ${items.length}</span>` : ''}</div>
-    ${items.length ? `<div class="list">${items.map(a => {
-      const c = S.customers.get(a.customerId) || {}, head = a.date !== lastDay ? `<div class="cday">${DAYS_LONG[dow(a.date)]} ${niceShort(a.date)}</div>` : '';
-      lastDay = a.date;
-      if (a.status === 'confirmed') return head + `<div class="li"><span class="pill ok" title="Confirmed">${ICON.check}</span><div class="grow"><button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button><div class="muted small">${a.time ? t12(a.time) : 'Any time'}${c.contact ? ' · ' + esc(c.contact) : ''}</div></div><button class="btn sm ghost" data-act="unconfirm" data-id="${a.id}">Undo</button></div>`;
-      return head + `<div class="li start cf"><div class="grow">
-        <button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button>
-        <div class="muted small">${ICON[a.kind]} ${a.time ? t12(a.time) : 'Any time'}${c.contact ? ' · ' + esc(c.contact) : ''}</div>
-        ${c.phone || c.email ? `<div class="muted small">${[c.phone, c.email].filter(Boolean).map(v => `<span class="copyable">${esc(v)}</span>`).join(' · ')}</div>` : ''}
+  const todo = items.filter(a => a.status === 'proposed');
+  const when = a => `<div class="cf-when"><b>${DAYS[dow(a.date)]} ${toD(a.date).getDate()}</b>${a.time ? t12s(a.time) : 'Any time'}</div>`;
+  const contact = c => [c.contact && esc(c.contact), c.phone && `<span class="copyable">${esc(c.phone)}</span>`, c.email && `<span class="copyable">${esc(c.email)}</span>`].filter(Boolean).map(v => `<div class="muted small cf-line">${v}</div>`).join('');
+  const row = a => {
+    const c = S.customers.get(a.customerId) || {}, ok = a.status === 'confirmed', open = !ok || S.cfOpen.has(a.id);
+    const links = `<button class="linkbtn" data-act="copy-confirm" data-id="${a.id}">Copy message</button>${lastMeeting(a) ? `<button class="linkbtn" data-act="prev-recap" data-id="${a.id}">Last recap</button>` : ''}<button class="linkbtn" data-act="open-appt" data-id="${a.id}">Move</button>`, cancel = `<button class="linkbtn bad" data-act="outcome" data-id="${a.id}" data-status="cancelled">Cancel</button>`;
+    return `<div class="cf-row ${ok ? 'done' : ''}">${when(a)}<div class="grow">
+        <div class="cf-head">${ok ? `<span class="cf-check" title="Confirmed">${ICON.check}</span>` : ''}<button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button>${ok ? `<button class="linkbtn cf-change" data-act="cf-change" data-id="${a.id}" aria-expanded="${open}">${open ? 'Done' : 'Change'}</button>` : ''}</div>
+        ${open ? contact(c) : ''}
         ${taskList(actionItems(a))}
-        <div class="row" style="gap:6px;margin-top:6px"><button class="btn sm primary" data-act="confirm" data-id="${a.id}">Confirmed</button><button class="btn sm" data-act="copy-confirm" data-id="${a.id}">Copy message</button>${lastMeeting(a) ? `<button class="btn sm" data-act="prev-recap" data-id="${a.id}">Previous recap</button>` : ''}<button class="btn sm" data-act="open-appt" data-id="${a.id}">Move…</button><button class="btn sm danger" data-act="outcome" data-id="${a.id}" data-status="cancelled">Cancel</button></div>
+        ${!ok ? `<div class="cf-acts"><button class="btn sm primary" data-act="confirm" data-id="${a.id}">Confirm</button>${links}${cancel}</div>`
+          : open ? `<div class="cf-acts">${links}<button class="linkbtn" data-act="unconfirm" data-id="${a.id}">Mark unconfirmed</button>${cancel}</div>` : ''}
       </div></div>`;
-    }).join('')}</div>` : `<div class="empty">${days[days.length - 1] < t ? 'This week is over.' : 'No visits left to confirm this week.'}</div>`}
+  };
+  return `<div class="panel"><div class="row"><h3>Confirm visits</h3><span class="spacer"></span>${items.length ? `<span class="pill ${todo.length ? 'warn' : 'ok'}">${todo.length ? todo.length + ' to confirm' : 'All confirmed'}</span>` : ''}</div>
+    ${items.length ? items.map(row).join('')
+      : `<div class="empty">${days[days.length - 1] < t ? 'This week is over.' : 'No visits left to confirm this week.'}</div>`}
   </div>`;
 }
 
@@ -1064,7 +1069,7 @@ function offerFile(filename, text, type = 'text/csv') {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }
 function exportWeek() {
-  const ws = weekStartOf(S.anchor), we = addDays(ws, 6);
+  const ws = shownWeekOf(S.anchor), we = addDays(ws, 6);
   const rows = [...S.appts.values()].filter(a => a.date >= ws && a.date <= we && isOpen(a)).sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
   if (!rows.length) { toast('Nothing open to export that week.'); return; }
   const head = ['Subject', 'Start Date', 'Start Time', 'End Date', 'End Time', 'All Day Event', 'Description', 'Location'];
@@ -1247,9 +1252,9 @@ $('#main').addEventListener('click', async e => {
   const act = t.dataset.act, id = t.dataset.id;
   const a = id ? S.appts.get(id) : null;
   switch (act) {
-    case 'wk': S.anchor = addDays(weekStartOf(S.anchor), +t.dataset.d); render(); break;
+    case 'wk': S.anchor = addDays(shownWeekOf(S.anchor), +t.dataset.d); render(); break;
     case 'wk-this': S.anchor = today(); render(); break;
-    case 'wk-next': S.anchor = addDays(weekStartOf(today()), 7); render(); break;
+    case 'wk-next': S.anchor = addDays(shownWeekOf(today()), 7); render(); break;
     case 'mo': { const d = toD(S.monthAnchor); S.monthAnchor = fmt(new Date(d.getFullYear(), d.getMonth() + +t.dataset.d, 1, 12)); render(); break; }
     case 'mo-today': S.monthAnchor = today(); render(); break;
     case 'mo-day': S.anchor = t.dataset.date; S.view = 'week'; render(); break;
@@ -1261,7 +1266,8 @@ $('#main').addEventListener('click', async e => {
     case 'outcome': if (a) outcomeDialog(a, t.dataset.status); break;
     case 'quick-done': if (a) { await setOutcome(a, 'completed'); render(); } break;
     case 'confirm': if (a && needDb()) { await guard(aRef(a.id).update({ status: 'confirmed' }), 'Confirmed.'); } break;
-    case 'unconfirm': if (a && needDb()) { await guard(aRef(a.id).update({ status: 'proposed' })); } break;
+    case 'unconfirm': if (a && needDb()) { S.cfOpen.delete(a.id); await guard(aRef(a.id).update({ status: 'proposed' })); } break;
+    case 'cf-change': if (S.cfOpen.has(t.dataset.id)) S.cfOpen.delete(t.dataset.id); else S.cfOpen.add(t.dataset.id); render(); break;
     case 'task-toggle': if (a && needDb()) {
       const done = new Set(a.actionsDone || []); if (t.checked) done.add(t.dataset.t); else done.delete(t.dataset.t);
       a.actionsDone = [...done]; render(); await guard(aRef(a.id).update({ actionsDone: a.actionsDone }));
