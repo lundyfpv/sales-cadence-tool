@@ -31,16 +31,31 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS files_appt ON files(appt_id);
   CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 `);
+// Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
+function addColumn(table, col, def) {
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+addColumn('users', 'name', 'TEXT');
+addColumn('users', 'manager_id', 'TEXT');
+addColumn('users', 'active', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('users', 'is_admin', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('docs', 'owner', 'TEXT');
+db.exec('CREATE INDEX IF NOT EXISTS docs_owner ON docs(owner)');
 
 const COLLECTIONS = new Set(['customers', 'appointments', 'config']);
+// Customers and appointments belong to a user (docs.owner). Settings are split: these keys are one
+// company-wide doc (config/company); everything else is personal (config/u:<userId>).
+const COMPANY_KEYS = ['productCategories', 'competitors', 'distributors', 'competitorsSeeded', 'usHolidays'];
 
 const q = {
   getKv: db.prepare('SELECT v FROM kv WHERE k = ?'),
   setKv: db.prepare('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v'),
   delKv: db.prepare('DELETE FROM kv WHERE k = ?'),
-  allDocs: db.prepare('SELECT coll, id, data FROM docs'),
-  getDoc: db.prepare('SELECT data FROM docs WHERE coll = ? AND id = ?'),
-  putDoc: db.prepare('INSERT INTO docs (coll, id, data, updated) VALUES (?, ?, ?, ?) ON CONFLICT(coll, id) DO UPDATE SET data = excluded.data, updated = excluded.updated'),
+  allDocs: db.prepare('SELECT coll, id, data, owner FROM docs'),
+  ownedDocs: db.prepare("SELECT coll, id, data, owner FROM docs WHERE coll IN ('customers', 'appointments') AND owner IN (SELECT value FROM json_each(?))"),
+  getDoc: db.prepare('SELECT data, owner FROM docs WHERE coll = ? AND id = ?'),
+  putDoc: db.prepare('INSERT INTO docs (coll, id, data, updated, owner) VALUES (?, ?, ?, ?, ?) ON CONFLICT(coll, id) DO UPDATE SET data = excluded.data, updated = excluded.updated, owner = excluded.owner'),
+  ownerless: db.prepare("UPDATE docs SET owner = ? WHERE coll IN ('customers', 'appointments') AND owner IS NULL"),
   delDoc: db.prepare('DELETE FROM docs WHERE coll = ? AND id = ?'),
   clearDocs: db.prepare('DELETE FROM docs'),
   fileCounts: db.prepare('SELECT appt_id, COUNT(*) AS n FROM files GROUP BY appt_id'),
@@ -60,20 +75,38 @@ let rev = kvGet('rev', 0);
 const listeners = new Set();
 function bump() { rev += 1; kvSet('rev', rev); for (const fn of listeners) { try { fn(rev); } catch {} } }
 
-function state() {
-  const out = { customers: [], appointments: [], settings: {}, fileCounts: {}, rev };
-  for (const r of q.allDocs.all()) {
-    const d = JSON.parse(r.data);
-    if (r.coll === 'customers') out.customers.push({ id: r.id, ...d });
-    else if (r.coll === 'appointments') out.appointments.push({ id: r.id, ...d });
-    else if (r.coll === 'config' && r.id === 'settings') out.settings = d;
+// What one user loads: customers and appointments owned by anyone in `owners`, plus their settings.
+function state(owners, userId) {
+  const out = { customers: [], appointments: [], settings: settingsFor(userId), fileCounts: {}, rev };
+  for (const r of q.ownedDocs.all(JSON.stringify(owners))) {
+    const d = { id: r.id, owner: r.owner, ...JSON.parse(r.data) };
+    (r.coll === 'customers' ? out.customers : out.appointments).push(d);
   }
-  for (const r of q.fileCounts.all()) out.fileCounts[r.appt_id] = r.n;
+  const appts = new Set(out.appointments.map(a => a.id));
+  for (const r of q.fileCounts.all()) if (appts.has(r.appt_id)) out.fileCounts[r.appt_id] = r.n;
   return out;
+}
+function settingsFor(userId) { return { ...(getDoc('config', 'u:' + userId) || {}), ...(getDoc('config', 'company') || {}) }; }
+// Save a full settings object: company keys only when the user may edit them, the rest as theirs.
+function saveSettings(userId, data, canEditCompany) {
+  const personal = {}, company = {};
+  for (const [k, v] of Object.entries(data)) (COMPANY_KEYS.includes(k) ? company : personal)[k] = v;
+  putDoc('config', 'u:' + userId, personal);
+  if (canEditCompany && Object.keys(company).length) putDoc('config', 'company', { ...(getDoc('config', 'company') || {}), ...company });
+}
+// One-time move from the single-user layout: existing records and settings become the first admin's.
+function migrate(adminId) {
+  if (!adminId) return;
+  transaction(() => {
+    q.ownerless.run(adminId);
+    const old = getDoc('config', 'settings');
+    if (old) { saveSettings(adminId, old, true); q.delDoc.run('config', 'settings'); }
+  });
 }
 
 function getDoc(coll, id) { const r = q.getDoc.get(coll, id); return r ? JSON.parse(r.data) : null; }
-function putDoc(coll, id, data) { q.putDoc.run(coll, id, JSON.stringify(data), Date.now()); }
+function docOwner(coll, id) { const r = q.getDoc.get(coll, id); return r ? r.owner : undefined; } // undefined = no such record
+function putDoc(coll, id, data, owner = docOwner(coll, id) ?? null) { const { id: _i, owner: _o, ...d } = data; q.putDoc.run(coll, id, JSON.stringify(d), Date.now(), owner); }
 function mergeDeep(a, b) {
   const out = { ...a };
   for (const [k, v] of Object.entries(b)) {
@@ -82,7 +115,7 @@ function mergeDeep(a, b) {
   }
   return out;
 }
-function patchDoc(coll, id, data) { const cur = getDoc(coll, id); if (!cur) return false; putDoc(coll, id, mergeDeep(cur, data)); return true; }
+function patchDoc(coll, id, data) { const cur = getDoc(coll, id); if (!cur) return false; const { id: _i, owner: _o, ...d } = data; putDoc(coll, id, mergeDeep(cur, d)); return true; }
 function deleteDoc(coll, id) {
   q.delDoc.run(coll, id);
   if (coll === 'appointments') for (const f of q.filesFor.all(id)) removeFile(f.id);
@@ -99,7 +132,7 @@ function transaction(fn) {
 }
 
 module.exports = {
-  db, DATA_DIR, UPLOAD_DIR, CERT_DIR, COLLECTIONS, q,
+  db, DATA_DIR, UPLOAD_DIR, CERT_DIR, COLLECTIONS, COMPANY_KEYS, q,
   kvGet, kvSet, kvDel, bump, listeners, getRev: () => rev,
-  state, getDoc, putDoc, patchDoc, deleteDoc, removeFile, transaction,
+  state, settingsFor, saveSettings, migrate, getDoc, docOwner, putDoc, patchDoc, deleteDoc, removeFile, transaction,
 };

@@ -357,3 +357,7 @@ a.btn.primary { color: var(--accent-ink); }
 /* month grid inside the .cal card (the card draws the border) */
 .cal .month { border: 0; border-radius: 0; }
 .unsched { max-height: 440px; overflow-y: auto; }
+
+/* whose customers and calendar are showing (managers) */
+.viewas { width: auto; max-width: 220px; padding: 5px 8px; font-size: .85rem; }
+@media (max-width: 760px) { .viewas { order: 2; max-width: 50vw; } }

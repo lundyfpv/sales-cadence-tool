@@ -41,7 +41,7 @@ const DEFAULT_SETTINGS = {
   confirmTemplate: 'Hi {first}, just confirming our {kind} on {day} at {time}. Let me know if anything changes. Thanks, {me}',
   recapTemplate: 'Hi {first},\n\nThanks for your time on {day}. Quick recap:\n{recap}\n\nI\'ll touch base again around {next}.\n\nThanks,\n{me}',
   theme: { mode: 'system', accent: 'slate' }, weekStart: 0,
-  prospectCadence: 2, coldAfter: 4, productCategories: ['Equipment', 'Accessories', 'Minisplits', 'Crossover', 'Samsung'], competitors: [], distributors: [],
+  prospectCadence: 2, coldAfter: 4, usHolidays: true, productCategories: ['Equipment', 'Accessories', 'Minisplits', 'Crossover', 'Samsung'], competitors: [], distributors: [],
 };
 
 /* ============ state ============ */
@@ -49,9 +49,10 @@ const S = {
   db: null, dl: null, status: 'connecting', customers: new Map(), appts: new Map(), settings: { ...DEFAULT_SETTINGS },
   view: 'week', anchor: today(), monthAnchor: today(), planWeek: null, confirmWeek: null,
   q: '', filter: 'all', sort: 'next', loaded: { c: false, a: false, s: false }, mobile: false, fileCounts: {}, user: null,
+  raw: { customers: [], appointments: [] }, users: [], roles: {}, canEditCompany: true, viewAs: 'me',
 };
 const VIEWS = [['week', 'Week'], ['month', 'Month'], ['plan', 'Recap and Plan', 'Fri'], ['confirm', 'Confirm', 'Mon'], ['customers', 'Customers'], ['settings', 'Settings']];
-try { const v = localStorage.getItem('cb.view'); if (v && VIEWS.some(x => x[0] === v)) S.view = v; } catch (e) {}
+try { const v = localStorage.getItem('cb.view'); if (v && VIEWS.some(x => x[0] === v)) S.view = v; S.viewAs = localStorage.getItem('cb.viewAs') || 'me'; } catch (e) {}
 
 const set = () => S.settings;
 const custName = c => c ? (c.name || c.contact || 'Unnamed') : 'Removed customer';
@@ -70,8 +71,32 @@ function actionItems(a) {
 const taskList = (items, live = true) => items.length ? `<ul class="tasks">${items.map(i => `<li class="${i.done ? 'done' : ''}">${live ? `<label><input type="checkbox" data-act="task-toggle" data-id="${i.from.id}" data-t="${esc(i.t)}" ${i.done ? 'checked' : ''}><span>${esc(i.t)}</span></label>` : `<span>${esc(i.t)}</span>`}</li>`).join('')}</ul>` : '';
 
 /* ============ cadence engine ============ */
-function isBlackout(s) { return (set().blackouts || []).some(b => s >= b.start && s <= (b.end || b.start)); }
-function blackoutLabel(s) { const b = (set().blackouts || []).find(b => s >= b.start && s <= (b.end || b.start)); return b ? (b.label || 'Blocked') : ''; }
+/* US federal holidays, worked out for any year. Major ones block visits like time off; the rest only show a label.
+   A fixed-date holiday on a Saturday is observed the Friday before, on a Sunday the Monday after. */
+const holidayCache = {};
+function usHolidays(y) {
+  if (holidayCache[y]) return holidayCache[y];
+  const ymd = (m, d) => fmt(new Date(y, m, d, 12));
+  const nth = (m, wd, n) => { const first = new Date(y, m, 1, 12); return ymd(m, 1 + ((wd - first.getDay() + 7) % 7) + (n - 1) * 7); };
+  const last = (m, wd) => { const end = new Date(y, m + 1, 0, 12); return ymd(m, end.getDate() - ((end.getDay() - wd + 7) % 7)); };
+  const obs = s => { const w = dow(s); return w === 6 ? addDays(s, -1) : w === 0 ? addDays(s, 1) : s; };
+  const thanks = nth(10, 4, 4);
+  return holidayCache[y] = [
+    [obs(ymd(0, 1)), "New Year's Day", true], [nth(0, 1, 3), 'Martin Luther King Jr. Day', false], [nth(1, 1, 3), "Presidents' Day", false],
+    [last(4, 1), 'Memorial Day', true], [obs(ymd(5, 19)), 'Juneteenth', false], [obs(ymd(6, 4)), 'Independence Day', true],
+    [nth(8, 1, 1), 'Labor Day', true], [nth(9, 1, 2), 'Columbus Day', false], [obs(ymd(10, 11)), 'Veterans Day', false],
+    [thanks, 'Thanksgiving', true], [addDays(thanks, 1), 'Day after Thanksgiving', true], [obs(ymd(11, 25)), 'Christmas Day', true],
+  ].map(([date, name, block]) => ({ date, name, block }));
+}
+function holidayOn(s) {
+  if (set().usHolidays === false || !s) return null;
+  const y = +s.slice(0, 4); // New Year's can be observed on Dec 31 of the year before
+  return [...usHolidays(y), ...usHolidays(y + 1)].find(h => h.date === s) || null;
+}
+function isBlackout(s) { return (set().blackouts || []).some(b => s >= b.start && s <= (b.end || b.start)) || !!holidayOn(s)?.block; }
+function blackoutLabel(s) { const b = (set().blackouts || []).find(b => s >= b.start && s <= (b.end || b.start)); if (b) return b.label || 'Blocked'; const h = holidayOn(s); return h?.block ? h.name : ''; }
+// Holidays that don't block anything, shown as a plain label
+function holidayNote(s) { const h = holidayOn(s); return h && !h.block && !blackoutLabel(s) ? h.name : ''; }
 function allowedDay(s, kind) {
   if (isBlackout(s)) return false;
   const w = dow(s);
@@ -169,7 +194,8 @@ async function api(method, url, body, file) {
 }
 function docRef(coll, id) {
   const u = `/api/docs/${coll}/${encodeURIComponent(id)}`;
-  return { id, set: d => api('PUT', u, d).then(refreshSoon), update: d => api('PATCH', u, d).then(refreshSoon), delete: () => api('DELETE', u).then(refreshSoon) };
+  const forWhom = S.viewAs !== 'me' && S.viewAs !== 'team' && coll !== 'config' ? '?owner=' + encodeURIComponent(S.viewAs) : '';
+  return { id, set: d => api('PUT', u + forWhom, d).then(refreshSoon), update: d => api('PATCH', u, d).then(refreshSoon), delete: () => api('DELETE', u).then(refreshSoon) };
 }
 S.db = { collection: c => ({ doc: id => docRef(c, id) }), doc: p => { const [c, id] = p.split('/'); return docRef(c, id); } };
 const cRef = id => S.db.collection('customers').doc(id);
@@ -297,7 +323,7 @@ window.matchMedia('(max-width: 760px)').addEventListener('change', () => render(
 
 /* ============ chip / event markup ============ */
 function evClass(a) { return `g-${custGroup(S.customers.get(a.customerId))} s-${a.status}`; }
-function evTitle(a) { return `${KINDS[a.kind] || 'Visit'}: ${apptName(a)} · ${a.status}${a.time ? ' · ' + t12(a.time) : ''}`; }
+function evTitle(a) { return `${KINDS[a.kind] || 'Visit'}: ${apptName(a)} · ${a.status}${a.time ? ' · ' + t12(a.time) : ''}${S.viewAs === 'team' && a.owner ? ' · ' + userName(a.owner) : ''}`; }
 function chip(a, extra = '') {
   return `<button class="chip ${evClass(a)}" data-appt="${a.id}" title="${esc(evTitle(a))}" ${extra}>${a.status === 'completed' ? ICON.check : ICON[a.kind] || ICON.visit}<span>${a.time ? t12s(a.time) + ' ' : ''}${esc(apptName(a))}</span>${S.fileCounts[a.id] ? ICON.clip : ''}</button>`;
 }
@@ -333,7 +359,7 @@ function weekGrid(days) {
     const w = dow(d), office = set().officeDays.includes(w), bl = blackoutLabel(d);
     const nv = visitsOn(d).length, cap = +set().maxVisitsPerDay;
     const meter = office ? '' : `<div class="meter ${nv > cap ? 'over' : ''}" title="${nv} of ${cap} visits">${Array.from({ length: Math.max(cap, nv) }, (_, i) => `<i class="${i < nv ? 'on' : ''}"></i>`).join('')}</div>`;
-    h += `<div class="dh ${office ? 'office' : ''} ${d === t ? 'today' : ''}"><div class="dname"><span>${DAYS[w]}</span><span>${office ? 'Office' : ''}</span></div><span class="dnum">${toD(d).getDate()}</span>${bl ? `<div class="dtag bad">${esc(bl)}</div>` : meter}</div>`;
+    h += `<div class="dh ${office ? 'office' : ''} ${d === t ? 'today' : ''}"><div class="dname"><span>${DAYS[w]}</span><span>${office ? 'Office' : ''}</span></div><span class="dnum">${toD(d).getDate()}</span>${bl ? `<div class="dtag bad">${esc(bl)}</div>` : meter}${holidayNote(d) ? `<div class="dtag">${esc(holidayNote(d))}</div>` : ''}</div>`;
   }
   h += `<div class="corner" style="font-size:.7rem;color:var(--muted);padding:6px 4px;text-align:right;border-bottom:1px solid var(--line)">All day</div>`;
   for (const d of days) {
@@ -365,7 +391,7 @@ function agenda(days) {
     const w = dow(d), office = set().officeDays.includes(w), bl = blackoutLabel(d);
     const items = apptsOn(d).sort((a, b) => (a.time || '00') < (b.time || '00') ? -1 : 1);
     const nv = visitsOn(d).length;
-    return `<section class="aday ${office ? 'office' : ''} ${d === today() ? 'today' : ''}"><div class="aday-h"><span class="dnum">${toD(d).getDate()}</span><b>${DAYS_LONG[w]}</b><span class="muted small">${office ? 'Office day' : nv + ' visit' + (nv === 1 ? '' : 's')}</span>${bl ? `<span class="pill bad">${esc(bl)}</span>` : ''}${nv > set().maxVisitsPerDay ? '<span class="pill bad">Over limit</span>' : ''}<span class="spacer"></span><button class="btn sm ghost" data-act="new-appt" data-date="${d}" aria-label="Add on ${nice(d)}">+</button></div>
+    return `<section class="aday ${office ? 'office' : ''} ${d === today() ? 'today' : ''}"><div class="aday-h"><span class="dnum">${toD(d).getDate()}</span><b>${DAYS_LONG[w]}</b><span class="muted small">${office ? 'Office day' : nv + ' visit' + (nv === 1 ? '' : 's')}</span>${bl ? `<span class="pill bad">${esc(bl)}</span>` : holidayNote(d) ? `<span class="pill">${esc(holidayNote(d))}</span>` : ''}${nv > set().maxVisitsPerDay ? '<span class="pill bad">Over limit</span>' : ''}<span class="spacer"></span><button class="btn sm ghost" data-act="new-appt" data-date="${d}" aria-label="Add on ${nice(d)}">+</button></div>
       ${items.length ? items.map(a => `<button class="aitem" data-act="open-appt" data-id="${a.id}"><span class="tm">${a.time ? t12(a.time) : 'Any time'}</span><span class="swatch ${evClass(a)}"></span><span class="grow"><b>${esc(apptName(a))}</b><br><span class="muted small">${KINDS[a.kind]} · ${a.status}</span></span></button>`).join('') : `<div class="aitem muted small" style="cursor:default">Nothing scheduled</div>`}
     </section>`;
   }).join('')}</div>`;
@@ -409,7 +435,7 @@ function viewMonth() {
   for (let i = 0; i < 42; i++) {
     const d = addDays(start, i), w = dow(d), items = apptsOn(d).sort((x, y) => (x.time || '') < (y.time || '') ? -1 : 1);
     const bl = blackoutLabel(d);
-    h += `<div class="mc ${toD(d).getMonth() !== m ? 'out' : ''} ${set().officeDays.includes(w) ? 'office' : ''} ${bl ? 'blk' : ''} ${d === t ? 'today' : ''}" data-act="mo-day" data-date="${d}" role="button" tabindex="0" aria-label="${nice(d)}, ${items.length} items"><span class="n">${toD(d).getDate()}${bl ? ` <span class="pill bad" style="font-size:.62rem">${esc(bl)}</span>` : ''}</span>${items.slice(0, 4).map(x => chip(x, 'tabindex="-1"')).join('')}${items.length > 4 ? `<span class="muted small">+${items.length - 4} more</span>` : ''}</div>`;
+    h += `<div class="mc ${toD(d).getMonth() !== m ? 'out' : ''} ${set().officeDays.includes(w) ? 'office' : ''} ${bl ? 'blk' : ''} ${d === t ? 'today' : ''}" data-act="mo-day" data-date="${d}" role="button" tabindex="0" aria-label="${nice(d)}, ${items.length} items"><span class="n">${toD(d).getDate()}${bl ? ` <span class="pill bad" style="font-size:.62rem">${esc(bl)}</span>` : holidayNote(d) ? ` <span class="pill" style="font-size:.62rem">${esc(holidayNote(d))}</span>` : ''}</span>${items.slice(0, 4).map(x => chip(x, 'tabindex="-1"')).join('')}${items.length > 4 ? `<span class="muted small">+${items.length - 4} more</span>` : ''}</div>`;
   }
   return h + `</div>${legend('Click a day to open its week')}</div><aside class="side">${unscheduledPanel()}</aside></div>`;
 }
@@ -470,7 +496,7 @@ function viewPlan() {
     <div class="side">
       <div class="colhead plan"><h2>Plan</h2><span class="muted small">Week of ${niceShort(ws)}</span></div>
       <div class="panel"><h3>3 · Week of ${niceShort(ws)}</h3>
-        <div class="loadbars">${loads.map(({ d, v, tc }) => { const office = set().officeDays.includes(dow(d)); return `<div class="lb ${office ? 'office' : ''} ${v > cap ? 'over' : ''}"><div class="label">${DAYS[dow(d)]}</div><div class="big">${v}</div><div class="muted small">${office ? 'office' : 'of ' + cap}${tc ? ' · ' + tc + ' calls' : ''}</div>${office ? '' : `<div class="bar"><i style="width:${Math.min(100, v / cap * 100)}%"></i></div>`}${isBlackout(d) ? `<div class="pill bad" style="margin-top:4px">${esc(blackoutLabel(d))}</div>` : ''}</div>`; }).join('')}</div>
+        <div class="loadbars">${loads.map(({ d, v, tc }) => { const office = set().officeDays.includes(dow(d)); return `<div class="lb ${office ? 'office' : ''} ${v > cap ? 'over' : ''}"><div class="label">${DAYS[dow(d)]}</div><div class="big">${v}</div><div class="muted small">${office ? 'office' : 'of ' + cap}${tc ? ' · ' + tc + ' calls' : ''}</div>${office ? '' : `<div class="bar"><i style="width:${Math.min(100, v / cap * 100)}%"></i></div>`}${isBlackout(d) ? `<div class="pill bad" style="margin-top:4px">${esc(blackoutLabel(d))}</div>` : holidayNote(d) ? `<div class="pill" style="margin-top:4px">${esc(holidayNote(d))}</div>` : ''}</div>`; }).join('')}</div>
         <button class="btn sm" data-act="goto-week" data-date="${ws}">Open this week on the calendar</button>
       </div>
       <div class="panel"><div class="row"><h3>Upcoming appointments</h3><span class="spacer"></span>${taskCount ? `<span class="pill warn">${taskCount} action item${taskCount === 1 ? '' : 's'}</span>` : ''}</div>
@@ -551,7 +577,7 @@ function viewCustomers() {
   ${ex ? `<div class="note warn row" style="margin-bottom:12px"><span style="flex:1;min-width:0">The customers marked “example” are sample data so you can see how things work. Delete them when you're ready to bring in your own.</span><button class="btn sm" data-act="clear-examples">Delete examples</button></div>` : ''}
   ${S.customers.size === 0 ? `<div class="panel" style="max-width:560px"><h3>No customers yet</h3><p class="muted" style="margin:0">Import a spreadsheet or CSV from your CRM, paste rows copied from Excel, or add customers one at a time. Everyone starts on a ${set().defaultCadence}-week cadence, and you can change any of them.</p><div class="row"><button class="btn primary" data-act="import">Import customers</button><button class="btn" data-act="new-cust">Add one</button></div></div>` : `
   <div class="tbl-wrap"><table><thead><tr><th><button class="linkbtn label" data-act="csort" data-s="name">Customer${S.sort === 'name' ? ' ↓' : ''}</button></th><th>Type</th><th>Cadence</th><th>Day</th><th>Last touch</th><th><button class="linkbtn label" data-act="csort" data-s="next">Next${S.sort === 'next' ? ' ↓' : ''}</button></th></tr></thead><tbody>
-  ${list.map(({ c, st }) => `<tr data-act="open-cust" data-id="${c.id}" class="${c.active === false ? 'paused' : ''}"><td><b>${esc(custName(c))}</b>${custTags(c)}${c.example ? ' <span class="pill">example</span>' : ''}<div class="sub">${esc([c.custId && '#' + c.custId, c.contact, c.address, (c.products || []).join(', ')].filter(Boolean).join(' · '))}</div></td><td><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span></td><td>${cadenceLabel(c)}</td><td>${hasHome(c) ? DAYS[+c.homeDay] : '<span class="muted">—</span>'}</td><td>${c.lastTouch ? niceShort(c.lastTouch) : '<span class="muted">—</span>'}</td><td><span class="pill ${st.cls}">${st.text}</span></td></tr>`).join('')}
+  ${list.map(({ c, st }) => `<tr data-act="open-cust" data-id="${c.id}" class="${c.active === false ? 'paused' : ''}"><td><b>${esc(custName(c))}</b>${custTags(c)}${c.example ? ' <span class="pill">example</span>' : ''}<div class="sub">${esc([S.viewAs === 'team' && c.owner && userName(c.owner), c.custId && '#' + c.custId, c.contact, c.address, (c.products || []).join(', ')].filter(Boolean).join(' · '))}</div></td><td><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span></td><td>${cadenceLabel(c)}</td><td>${hasHome(c) ? DAYS[+c.homeDay] : '<span class="muted">—</span>'}</td><td>${c.lastTouch ? niceShort(c.lastTouch) : '<span class="muted">—</span>'}</td><td><span class="pill ${st.cls}">${st.text}</span></td></tr>`).join('')}
   </tbody></table>${list.length ? '' : '<div class="empty" style="padding:14px">No customers match.</div>'}</div>`}`;
 }
 
@@ -583,11 +609,13 @@ function viewSettings() {
       <label class="fld"><span>Prospect is “going cold” after this many follow-ups</span><input type="number" min="1" id="s-cold" data-set="coldAfter" data-num value="${s.coldAfter}"></label></div>
       <p class="muted small" style="margin:0">The next date is counted from the original appointment date, even if the visit was missed or moved just that once. A day-based cadence that lands on an office day moves to the nearest visit day: Monday moves to Tuesday and Friday moves to Thursday.</p>
     </div>
-    ${PICK_LISTS.map(L => `<div class="panel"><h3>${L.title}</h3><p class="muted small" style="margin:0">The “${L.label}” checkboxes on each customer. You can also add one with the + on any customer.</p>
-      <div class="list">${(s[L.setKey] || []).map(p => `<div class="li"><div class="grow">${esc(p)}</div><button class="btn sm danger" data-act="list-del" data-k="${L.setKey}" data-v="${esc(p)}">Remove</button></div>`).join('') || '<div class="empty">None yet.</div>'}</div>
-      <div class="row"><input class="inp" id="add-${L.setKey}" placeholder="New ${L.noun}" style="flex:1;min-width:0"><button class="btn" data-act="list-add" data-k="${L.setKey}">Add</button></div>
+    ${PICK_LISTS.map(L => `<div class="panel"><h3>${L.title}</h3><p class="muted small" style="margin:0">The “${L.label}” checkboxes on each customer. ${S.canEditCompany ? 'Shared by the whole company. You can also add one with the + on any customer.' : 'Shared by the whole company; your manager keeps this list.'}</p>
+      <div class="list">${(s[L.setKey] || []).map(p => `<div class="li"><div class="grow">${esc(p)}</div>${S.canEditCompany ? `<button class="btn sm danger" data-act="list-del" data-k="${L.setKey}" data-v="${esc(p)}">Remove</button>` : ''}</div>`).join('') || '<div class="empty">None yet.</div>'}</div>
+      ${S.canEditCompany ? `<div class="row"><input class="inp" id="add-${L.setKey}" placeholder="New ${L.noun}" style="flex:1;min-width:0"><button class="btn" data-act="list-add" data-k="${L.setKey}">Add</button></div>` : ''}
     </div>`).join('')}
     <div class="panel"><h3>Holidays & time off</h3><p class="muted small" style="margin:0">Blocked days are shaded on the calendar and skipped when suggesting dates.</p>
+      <label class="fld"><span>US federal holidays${S.canEditCompany ? '' : ' <span class="muted">(set for the whole company)</span>'}</span><select id="s-hol" data-set="usHolidays" data-bool ${S.canEditCompany ? '' : 'disabled'}><option value="true">Show them; block the major ones</option><option value="false" ${s.usHolidays === false ? 'selected' : ''}>Don't show holidays</option></select></label>
+      ${s.usHolidays === false ? '' : `<p class="muted small" style="margin:0">Blocked: New Year's, Memorial Day, July 4th, Labor Day, Thanksgiving and the day after, Christmas. The rest are labeled only. Coming up: ${usHolidays(+today().slice(0, 4)).concat(usHolidays(+today().slice(0, 4) + 1)).filter(h => h.date >= today()).slice(0, 3).map(h => `${esc(h.name)} ${niceShort(h.date)}${h.block ? ' (blocked)' : ''}`).join(', ')}.</p>`}
       <div class="list">${bl.length ? bl.map((b, i) => `<div class="li"><div class="grow"><b>${esc(b.label || 'Blocked')}</b><div class="muted small">${nice(b.start)}${b.end && b.end !== b.start ? ' – ' + nice(b.end) : ''}</div></div><button class="btn sm danger" data-act="bl-del" data-start="${b.start}" data-label="${esc(b.label || '')}">Remove</button></div>`).join('') : '<div class="empty">None yet.</div>'}</div>
       <div class="form"><label class="fld"><span>From</span><input type="date" id="bl-start"></label><label class="fld"><span>To (optional)</span><input type="date" id="bl-end"></label><label class="fld full"><span>Label</span><input id="bl-label" placeholder="Thanksgiving, PTO, sales meeting…"></label></div>
       <div><button class="btn" data-act="bl-add">Add blocked dates</button></div>
@@ -827,8 +855,8 @@ function customerDialog(c) {
         const box = el.querySelector(`[data-pick="${L.key}"]`), add = el.querySelector(`[data-pick-add="${L.key}"]`), inp = add.querySelector('input');
         const draw = checked => {
           const items = [...new Set([...(set()[L.setKey] || []), ...checked])];
-          box.innerHTML = items.map(p => `<label><input type="checkbox" value="${esc(p)}" ${checked.includes(p) ? 'checked' : ''}>${esc(p)}</label>`).join('') + `<button class="btn sm" type="button" aria-label="Add a ${L.noun}" title="Add a ${L.noun}">+</button>`;
-          box.querySelector('button').onclick = () => { add.hidden = false; inp.focus(); };
+          box.innerHTML = items.map(p => `<label><input type="checkbox" value="${esc(p)}" ${checked.includes(p) ? 'checked' : ''}>${esc(p)}</label>`).join('') + (S.canEditCompany ? `<button class="btn sm" type="button" aria-label="Add a ${L.noun}" title="Add a ${L.noun}">+</button>` : '');
+          const plus = box.querySelector('button'); if (plus) plus.onclick = () => { add.hidden = false; inp.focus(); };
         };
         draw(pickVals(c, L));
         const addOne = async () => {
@@ -1172,7 +1200,7 @@ $('#main').addEventListener('change', e => {
   const el = e.target;
   if (el.dataset.set) {
     let v = el.value; if ('num' in el.dataset) v = Math.max(0, +v || 0); if ('bool' in el.dataset) v = v === 'true';
-    saveSettings({ [el.dataset.set]: v });
+    saveSettings({ [el.dataset.set]: v }); if (el.dataset.set === 'usHolidays') render();
   } else if (el.dataset.setArr) {
     const name = el.dataset.setArr, vals = [...document.querySelectorAll(`[data-set-arr="${name}"]:checked`)].map(x => +x.value);
     saveSettings({ [name]: vals }).then(render);
@@ -1226,14 +1254,35 @@ function setOnline(v) {
 }
 let refreshTimer = null;
 function refreshSoon() { clearTimeout(refreshTimer); refreshTimer = setTimeout(loadState, 120); }
+/* ============ team: whose customers and calendar are showing ============ */
+// 'me', one team member's id, or 'team' for everyone you can see
+const viewOwner = () => S.viewAs === 'team' ? null : S.users.some(u => u.id === S.viewAs) ? S.viewAs : S.user?.id;
+const userById = id => S.users.find(u => u.id === id);
+const userName = id => { const u = userById(id); return u ? (u.name || u.username) : ''; };
+const roleLabel = u => (S.roles[u.role] || u.role) + (u.admin && u.role !== 'admin' ? ' + Admin' : '');
+function applyView() {
+  const o = viewOwner(), mine = x => !o || x.owner === o;
+  S.customers = new Map(S.raw.customers.filter(mine).map(c => [c.id, c]));
+  S.appts = new Map(S.raw.appointments.filter(mine).map(a => [a.id, a]));
+}
+function drawViewAs() {
+  $('#menu-admin').textContent = S.user.admin ? 'Admin: people, HTTPS, backups' : 'Account & team';
+  const sel = $('#viewas'), others = S.users.filter(u => u.id !== S.user.id);
+  sel.hidden = !others.length; if (!others.length) return;
+  const cur = S.viewAs === 'team' || others.some(u => u.id === S.viewAs) ? S.viewAs : 'me';
+  sel.innerHTML = `<option value="me">Viewing: me</option>${others.map(u => `<option value="${u.id}">${esc(u.name || u.username)} · ${esc(S.roles[u.role] || u.role)}${u.active ? '' : ' (off)'}</option>`).join('')}<option value="team">Whole team</option>`;
+  sel.value = cur;
+}
+$('#viewas').onchange = e => { S.viewAs = e.target.value; try { localStorage.setItem('cb.viewAs', S.viewAs); } catch (x) {} applyView(); render(); };
+
 async function loadState() {
   try {
     const st = await api('GET', '/api/state');
-    S.customers = new Map(st.customers.map(c => [c.id, c]));
-    S.appts = new Map(st.appointments.map(a => [a.id, a]));
+    S.raw = st; S.users = st.users || []; S.roles = st.roles || {}; S.canEditCompany = st.canEditCompany !== false;
+    S.user = st.user; applyView(); drawViewAs();
     S.settings = { ...DEFAULT_SETTINGS, ...(st.settings || {}) };
     S.fileCounts = st.fileCounts || {};
-    S.user = st.user; S.status = 'ready';
+    S.status = 'ready';
     applyTheme(); requestRender();
     // one time: brands typed into the old single competitor field join the Competitor brands list
     if (!S.settings.competitorsSeeded) {
@@ -1251,7 +1300,7 @@ function listen() {
 }
 /* account menu */
 const menuBtn = $('#menu-btn'), menuPop = $('#menu-pop');
-menuBtn.onclick = e => { e.stopPropagation(); menuPop.hidden = !menuPop.hidden; menuBtn.setAttribute('aria-expanded', !menuPop.hidden); if (!menuPop.hidden) { $('#menu-who').textContent = 'Signed in as ' + (S.user?.username || ''); drawThemeMenu(); } };
+menuBtn.onclick = e => { e.stopPropagation(); menuPop.hidden = !menuPop.hidden; menuBtn.setAttribute('aria-expanded', !menuPop.hidden); if (!menuPop.hidden) { $('#menu-who').textContent = S.user ? `${S.user.name || S.user.username} · ${roleLabel(S.user)}` : ''; drawThemeMenu(); } };
 document.addEventListener('click', e => { if (!menuPop.hidden && !menuPop.contains(e.target)) { menuPop.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); } });
 const THEME_MODES = [['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark'], ['oled', 'OLED black']];
 const drawThemeMenu = () => {

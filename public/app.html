@@ -19,6 +19,7 @@
 <div class="top"><div class="top-in gut">
   <a class="brand" href="/"><img src="/icons/icon-192.png" alt=""><h1>Sales Cadence Tool</h1></a>
   <nav class="tabs" id="tabs" aria-label="Views"></nav>
+  <select class="inp viewas" id="viewas" hidden aria-label="Whose customers and calendar to show"></select>
   <span class="sync" id="sync">Connecting…</span>
   <div class="menu">
     <button class="menu-btn" id="menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="Account menu"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="5.5" r="2.8"/><path d="M2.5 14c.8-2.6 3-4 5.5-4s4.7 1.4 5.5 4"/></svg></button>
@@ -28,7 +29,7 @@
       <div id="menu-themes" role="group" aria-label="Theme"></div>
       <hr class="menu-sep">
       <button id="menu-install">Install app</button>
-      <a href="/admin">Admin: login, HTTPS, backups</a>
+      <a href="/admin" id="menu-admin">Account &amp; team</a>
       <button id="menu-out">Sign out</button>
     </div>
   </div>
