@@ -1417,6 +1417,11 @@ function applyView() {
   S.appts = new Map(S.raw.appointments.filter(mine).map(a => [a.id, a]));
 }
 function drawViewAs() {
+  // the company's wide logo in the header on wide screens, when an admin has uploaded one
+  const brand = $('.brand'); let wm = brand.querySelector('.wordmark');
+  if (S.raw.brand?.header && !wm) { wm = document.createElement('img'); wm.className = 'wordmark'; wm.alt = 'Sales Cadence Tool'; wm.src = '/brand/header.png'; brand.insertBefore(wm, brand.querySelector('h1')); }
+  if (!S.raw.brand?.header && wm) wm.remove();
+  brand.classList.toggle('has-wordmark', !!S.raw.brand?.header);
   if (S.user.photo) $('#menu-btn').innerHTML = `<img class="avatar" src="/api/users/${S.user.id}/photo?v=${S.user.photo}" alt="">`;
   $('#menu-admin').textContent = S.user.admin ? 'Admin: people, HTTPS, backups' : 'Account & team';
   const sel = $('#viewas'), others = S.users.filter(u => u.id !== S.user.id);
