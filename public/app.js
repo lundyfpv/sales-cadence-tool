@@ -41,7 +41,7 @@ const DEFAULT_SETTINGS = {
   confirmTemplate: 'Hi {first}, just confirming our {kind} on {day} at {time}. Let me know if anything changes. Thanks, {me}',
   recapTemplate: 'Hi {first},\n\nThanks for your time on {day}. Quick recap:\n{recap}\n\nI\'ll touch base again around {next}.\n\nThanks,\n{me}',
   theme: { mode: 'system', accent: 'slate' }, weekStart: 0,
-  prospectCadence: 2, coldAfter: 4, productCategories: ['Equipment', 'Accessories', 'Minisplits', 'Crossover', 'Samsung'], competitors: [],
+  prospectCadence: 2, coldAfter: 4, productCategories: ['Equipment', 'Accessories', 'Minisplits', 'Crossover', 'Samsung'], competitors: [], distributors: [],
 };
 
 /* ============ state ============ */
@@ -107,7 +107,15 @@ function isCold(c) {
   return n >= (+set().coldAfter || 4);
 }
 const custTags = c => `${c.prospect ? ' <span class="pill prospect">Prospect</span>' : c.assigned ? ' <span class="pill assigned">Assigned</span>' : ''}${isCold(c) ? ' <span class="pill bad">Going cold</span>' : ''}`;
-const competitorNames = () => [...new Set([...(set().competitors || []), ...[...S.customers.values()].map(c => (c.competitor || '').trim())].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+// Checkbox lists on the customer record, each with a master list in Settings
+const PICK_LISTS = [
+  { key: 'products', setKey: 'productCategories', label: 'Currently buying', title: 'Product categories', noun: 'category' },
+  { key: 'competitors', setKey: 'competitors', label: 'Competitor equipment brands', title: 'Competitor brands', noun: 'brand' },
+  { key: 'distributors', setKey: 'distributors', label: 'Current distributor', title: 'Distributors', noun: 'distributor' },
+];
+// competitor used to be a single text field; read it as a one-item list
+const pickVals = (c, L) => L.key === 'competitors' && !c.competitors ? (c.competitor ? [c.competitor] : []) : (c[L.key] || []);
+function normList(v, setKey) { const cats = set()[setKey] || []; return [...new Set(String(v).split(/[;,|\n]/).map(x => x.trim()).filter(Boolean).map(x => cats.find(k => k.toLowerCase() === x.toLowerCase()) || x))]; }
 function cadenceLabel(c) { const n = +c.cadence || set().defaultCadence; return c.unit === 'days' ? `Every ${n} day${n == 1 ? '' : 's'}` : `Every ${n} wk${n == 1 ? '' : 's'}`; }
 function customerState(c) {
   const t = today();
@@ -527,7 +535,7 @@ function viewConfirm() {
 function viewCustomers() {
   const q = S.q.trim().toLowerCase();
   let list = [...S.customers.values()].map(c => ({ c, st: customerState(c) }));
-  if (q) list = list.filter(({ c }) => [c.name, c.custId, c.contact, c.email, c.phone, c.address, c.notes, c.competitor, (c.products || []).join(' ')].some(v => String(v || '').toLowerCase().includes(q)));
+  if (q) list = list.filter(({ c }) => [c.name, c.custId, c.contact, c.email, c.phone, c.address, c.notes, ...PICK_LISTS.map(L => pickVals(c, L).join(' '))].some(v => String(v || '').toLowerCase().includes(q)));
   if (S.filter === 'visit') list = list.filter(x => (x.c.kind || 'visit') === 'visit');
   if (S.filter === 'touch') list = list.filter(x => isTouch(x.c.kind));
   if (S.filter === 'attn') list = list.filter(x => x.st.rank <= 3);
@@ -575,9 +583,10 @@ function viewSettings() {
       <label class="fld"><span>Prospect is “going cold” after this many follow-ups</span><input type="number" min="1" id="s-cold" data-set="coldAfter" data-num value="${s.coldAfter}"></label></div>
       <p class="muted small" style="margin:0">The next date is counted from the original appointment date, even if the visit was missed or moved just that once. A day-based cadence that lands on an office day moves to the nearest visit day: Monday moves to Tuesday and Friday moves to Thursday.</p>
     </div>
-    <div class="panel"><h3>Product categories</h3><p class="muted small" style="margin:0">The “Currently buying” checkboxes on each customer. Add more with the + on any customer.</p>
-      <div class="list">${(s.productCategories || []).map(p => `<div class="li"><div class="grow">${esc(p)}</div><button class="btn sm danger" data-act="cat-del" data-v="${esc(p)}">Remove</button></div>`).join('') || '<div class="empty">None yet.</div>'}</div>
-    </div>
+    ${PICK_LISTS.map(L => `<div class="panel"><h3>${L.title}</h3><p class="muted small" style="margin:0">The “${L.label}” checkboxes on each customer. You can also add one with the + on any customer.</p>
+      <div class="list">${(s[L.setKey] || []).map(p => `<div class="li"><div class="grow">${esc(p)}</div><button class="btn sm danger" data-act="list-del" data-k="${L.setKey}" data-v="${esc(p)}">Remove</button></div>`).join('') || '<div class="empty">None yet.</div>'}</div>
+      <div class="row"><input class="inp" id="add-${L.setKey}" placeholder="New ${L.noun}" style="flex:1;min-width:0"><button class="btn" data-act="list-add" data-k="${L.setKey}">Add</button></div>
+    </div>`).join('')}
     <div class="panel"><h3>Holidays & time off</h3><p class="muted small" style="margin:0">Blocked days are shaded on the calendar and skipped when suggesting dates.</p>
       <div class="list">${bl.length ? bl.map((b, i) => `<div class="li"><div class="grow"><b>${esc(b.label || 'Blocked')}</b><div class="muted small">${nice(b.start)}${b.end && b.end !== b.start ? ' – ' + nice(b.end) : ''}</div></div><button class="btn sm danger" data-act="bl-del" data-start="${b.start}" data-label="${esc(b.label || '')}">Remove</button></div>`).join('') : '<div class="empty">None yet.</div>'}</div>
       <div class="form"><label class="fld"><span>From</span><input type="date" id="bl-start"></label><label class="fld"><span>To (optional)</span><input type="date" id="bl-end"></label><label class="fld full"><span>Label</span><input id="bl-label" placeholder="Thanksgiving, PTO, sales meeting…"></label></div>
@@ -786,12 +795,11 @@ function customerDialog(c) {
         <label class="fld"><span>Contact person</span><input id="cd-contact" value="${esc(c.contact)}"></label>
         <label class="fld"><span>Phone</span><input id="cd-phone" type="tel" value="${esc(c.phone)}"></label>
         <label class="fld"><span>Email</span><input id="cd-email" type="email" value="${esc(c.email)}"></label>
-        <label class="fld"><span>Address / city</span><input id="cd-address" value="${esc(c.address)}"></label>
-        <label class="fld"><span>Competitor equipment brand</span><input id="cd-comp" list="cd-comp-list" autocomplete="off" value="${esc(c.competitor || '')}"><datalist id="cd-comp-list">${competitorNames().map(n => `<option value="${esc(n)}">`).join('')}</datalist></label>
+        <label class="fld full"><span>Address / city</span><input id="cd-address" value="${esc(c.address)}"></label>
         <label class="cb"><input type="checkbox" id="cd-prospect" ${c.prospect ? 'checked' : ''}><span>Prospect <span class="muted">(follow up every ${+set().prospectCadence || 2} weeks)</span></span></label>
         <label class="cb"><input type="checkbox" id="cd-assigned" ${c.assigned ? 'checked' : ''}><span>Assigned account</span></label>
-        <div class="fld full"><span>Currently buying</span><div class="daypick" id="cd-prods"></div>
-          <div class="row" id="cd-cat-add" hidden><input class="inp" id="cd-cat-new" placeholder="New category" style="max-width:220px"><button class="btn sm" id="cd-cat-ok" type="button">Add</button></div></div>
+        ${PICK_LISTS.map(L => `<div class="fld full"><span>${L.label}</span><div class="daypick" data-pick="${L.key}"></div>
+          <div class="row" data-pick-add="${L.key}" hidden><input class="inp" placeholder="New ${L.noun}" style="max-width:220px"><button class="btn sm" type="button">Add</button></div></div>`).join('')}
         <label class="fld"><span>How you touch them</span><select id="cd-kind">${Object.entries(KINDS).map(([k, l]) => `<option value="${k}" ${k === (c.kind || 'visit') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="fld"><span>Cadence</span><div class="inline"><input type="number" min="1" id="cd-cad" value="${c.cadence || set().defaultCadence}" style="width:80px"><select id="cd-unit"><option value="weeks">weeks</option><option value="days" ${c.unit === 'days' ? 'selected' : ''}>days</option></select></div></label>
         <label class="fld"><span>Their day</span><select id="cd-home"><option value="">Not set (taken from first visit)</option>${[1, 2, 3, 4, 5].map(d => `<option value="${d}" ${String(c.homeDay) === String(d) ? 'selected' : ''}>${DAYS_LONG[d]}</option>`).join('')}</select></label>
@@ -811,25 +819,28 @@ function customerDialog(c) {
         name: g('#cd-name').value.trim(), custId: g('#cd-custid').value.trim(), contact: g('#cd-contact').value.trim(), phone: g('#cd-phone').value.trim(), email: g('#cd-email').value.trim(), address: g('#cd-address').value.trim(),
         kind: g('#cd-kind').value, cadence: Math.max(1, +g('#cd-cad').value || set().defaultCadence || 4), unit: g('#cd-unit').value, homeDay: g('#cd-home').value === '' ? '' : +g('#cd-home').value,
         preferredTime: g('#cd-time').value, duration: +g('#cd-dur').value || set().visitLength, rhythmDate: g('#cd-rhythm').value, notes: g('#cd-notes').value, active: g('#cd-active').checked,
-        prospect: g('#cd-prospect').checked, assigned: g('#cd-assigned').checked, competitor: g('#cd-comp').value.trim(),
-        products: [...el.querySelectorAll('#cd-prods input:checked')].map(x => x.value),
+        prospect: g('#cd-prospect').checked, assigned: g('#cd-assigned').checked, competitor: '',
+        ...Object.fromEntries(PICK_LISTS.map(L => [L.key, [...el.querySelectorAll(`[data-pick="${L.key}"] input:checked`)].map(x => x.value)])),
       });
-      // product checkboxes: your categories plus anything this customer already has, and a + to add one
-      const drawProds = (checked = c.products || []) => {
-        const cats = [...new Set([...(set().productCategories || []), ...checked])];
-        g('#cd-prods').innerHTML = cats.map(p => `<label><input type="checkbox" value="${esc(p)}" ${checked.includes(p) ? 'checked' : ''}>${esc(p)}</label>`).join('') + '<button class="btn sm" id="cd-cat-plus" type="button" aria-label="Add a category" title="Add a category">+</button>';
-        g('#cd-cat-plus').onclick = () => { g('#cd-cat-add').hidden = false; g('#cd-cat-new').focus(); };
-      };
-      drawProds();
-      const addCat = async () => {
-        const v = g('#cd-cat-new').value.trim(); if (!v) return;
-        const cats = set().productCategories || [], have = [...el.querySelectorAll('#cd-prods input:checked')].map(x => x.value);
-        const name = cats.find(x => x.toLowerCase() === v.toLowerCase()) || v;
-        if (!cats.includes(name)) await saveSettings({ productCategories: [...cats, name] }, true);
-        g('#cd-cat-new').value = ''; g('#cd-cat-add').hidden = true; drawProds([...have, name]);
-      };
-      g('#cd-cat-ok').onclick = addCat;
-      g('#cd-cat-new').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addCat(); } };
+      // checkbox lists: the master list from Settings plus anything this customer already has, and a + to add one
+      for (const L of PICK_LISTS) {
+        const box = el.querySelector(`[data-pick="${L.key}"]`), add = el.querySelector(`[data-pick-add="${L.key}"]`), inp = add.querySelector('input');
+        const draw = checked => {
+          const items = [...new Set([...(set()[L.setKey] || []), ...checked])];
+          box.innerHTML = items.map(p => `<label><input type="checkbox" value="${esc(p)}" ${checked.includes(p) ? 'checked' : ''}>${esc(p)}</label>`).join('') + `<button class="btn sm" type="button" aria-label="Add a ${L.noun}" title="Add a ${L.noun}">+</button>`;
+          box.querySelector('button').onclick = () => { add.hidden = false; inp.focus(); };
+        };
+        draw(pickVals(c, L));
+        const addOne = async () => {
+          const v = inp.value.trim(); if (!v) return;
+          const cur = set()[L.setKey] || [], have = [...box.querySelectorAll('input:checked')].map(x => x.value);
+          const name = cur.find(x => x.toLowerCase() === v.toLowerCase()) || v;
+          if (!cur.includes(name)) await saveSettings({ [L.setKey]: [...cur, name] }, true);
+          inp.value = ''; add.hidden = true; draw([...have, name]);
+        };
+        add.querySelector('button').onclick = addOne;
+        inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addOne(); } };
+      }
       // ticking Prospect switches the cadence to prospect follow-ups; unticking puts back your default
       g('#cd-prospect').onchange = () => {
         const p = g('#cd-prospect').checked;
@@ -841,7 +852,6 @@ function customerDialog(c) {
         if (!needDb()) return;
         close();
         if (d.prospect && (isNew || !c.prospect)) d.prospectSince = today();
-        if (d.competitor && !competitorNames().some(n => n.toLowerCase() === d.competitor.toLowerCase())) await saveSettings({ competitors: [...(set().competitors || []), d.competitor] }, true);
         if (isNew) { const id = uid(); if (await guard(cRef(id).set({ ...d, lastTouch: '', createdAt: Date.now() }), 'Customer added.')) S.customers.set(id, { id, ...d }); }
         else if (await guard(cRef(c.id).update(d), 'Saved.')) S.customers.set(c.id, { ...c, ...d });
         render();
@@ -928,8 +938,8 @@ function exportWeek() {
   offerFile(`cadence-week-${ws}.csv`, lines.join('\r\n'));
 }
 function exportCustomers() {
-  const head = ['Name', 'Customer ID', 'Prospect', 'Assigned', 'Currently buying', 'Competitor brand', 'Contact', 'Phone', 'Email', 'Address', 'Type', 'Cadence', 'Unit', 'Day', 'Preferred time', 'Last touch', 'Last on-rhythm date', 'Next due', 'Active', 'Notes'];
-  const lines = [head.join(',')].concat([...S.customers.values()].sort((a, b) => custName(a).localeCompare(custName(b))).map(c => [c.name, c.custId, c.prospect ? 'Yes' : 'No', c.assigned ? 'Yes' : 'No', (c.products || []).join('; '), c.competitor, c.contact, c.phone, c.email, c.address, KINDS[c.kind || 'visit'], c.cadence, c.unit || 'weeks', hasHome(c) ? DAYS_LONG[+c.homeDay] : '', c.preferredTime, c.lastTouch, c.rhythmDate, dueDate(c) || '', c.active === false ? 'No' : 'Yes', c.notes].map(csvCell).join(',')));
+  const head = ['Name', 'Customer ID', 'Prospect', 'Assigned', 'Currently buying', 'Competitor brands', 'Distributors', 'Contact', 'Phone', 'Email', 'Address', 'Type', 'Cadence', 'Unit', 'Day', 'Preferred time', 'Last touch', 'Last on-rhythm date', 'Next due', 'Active', 'Notes'];
+  const lines = [head.join(',')].concat([...S.customers.values()].sort((a, b) => custName(a).localeCompare(custName(b))).map(c => [c.name, c.custId, c.prospect ? 'Yes' : 'No', c.assigned ? 'Yes' : 'No', ...PICK_LISTS.map(L => pickVals(c, L).join('; ')), c.contact, c.phone, c.email, c.address, KINDS[c.kind || 'visit'], c.cadence, c.unit || 'weeks', hasHome(c) ? DAYS_LONG[+c.homeDay] : '', c.preferredTime, c.lastTouch, c.rhythmDate, dueDate(c) || '', c.active === false ? 'No' : 'Yes', c.notes].map(csvCell).join(',')));
   offerFile(`customers-${today()}.csv`, lines.join('\r\n'));
 }
 
@@ -939,7 +949,8 @@ const IMPORT_FIELDS = [
   ['prospect', 'Prospect (yes/no)', ['prospect', 'stage']],
   ['assigned', 'Assigned account (yes/no)', ['assigned', 'assigned account']],
   ['products', 'Currently buying', ['currently buying', 'products', 'buying', 'product lines', 'categories']],
-  ['competitor', 'Competitor brand', ['competitor', 'competitor brand', 'competition']],
+  ['competitors', 'Competitor brands', ['competitor', 'competitor brand', 'competitor brands', 'competition']],
+  ['distributors', 'Current distributor', ['distributor', 'current distributor', 'supplier', 'wholesaler']],
   ['email', 'Email', ['email', 'e-mail']],
   ['phone', 'Phone', ['phone', 'mobile', 'cell', 'tel']],
   ['contact', 'Contact person', ['contact', 'first name', 'person', 'buyer', 'owner']],
@@ -978,7 +989,6 @@ function guessMap(headers) {
   return map;
 }
 function normYes(v) { return /^(y|yes|true|1|x|✓|prospect|assigned)/i.test(String(v || '').trim()); }
-function normProducts(v) { const cats = set().productCategories || []; return [...new Set(String(v).split(/[;,|\n]/).map(x => x.trim()).filter(Boolean).map(x => cats.find(k => k.toLowerCase() === x.toLowerCase()) || x))]; }
 function normKind(v) { v = String(v || '').toLowerCase(); if (!v) return null; if (/e-?mail/.test(v)) return 'email'; if (/text|sms/.test(v)) return 'text'; if (/call|phone/.test(v)) return 'call'; if (/visit|in.?person|onsite|on-site|f2f|face/.test(v)) return 'visit'; return null; }
 function normCadence(v) { v = String(v || '').toLowerCase(); const n = parseFloat(v); if (!n) return null; return { cadence: Math.round(n), unit: /day|\bd\b/.test(v) ? 'days' : 'weeks' }; }
 function normDay(v) { v = String(v || '').toLowerCase().trim(); if (!v) return ''; const i = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].findIndex(d => v.startsWith(d)); return i >= 1 && i <= 5 ? i : ''; }
@@ -1038,10 +1048,10 @@ function importDialog() {
           const last = normDate(val(r, 'lastTouch'));
           let home = normDay(val(r, 'homeDay'));
           if (home === '' && last && cad.unit === 'weeks') { const w = dow(last); if (w >= 1 && w <= 5) home = w; }
-          return { name, custId: val(r, 'custId'), contact: val(r, 'contact') !== name ? val(r, 'contact') : '', phone: val(r, 'phone'), email: val(r, 'email'), address: val(r, 'address'), kind: normKind(val(r, 'kind')) || dk, ...cad, homeDay: home, lastTouch: last, rhythmDate: last, notes: val(r, 'notes'), competitor: val(r, 'competitor'),
+          return { name, custId: val(r, 'custId'), contact: val(r, 'contact') !== name ? val(r, 'contact') : '', phone: val(r, 'phone'), email: val(r, 'email'), address: val(r, 'address'), kind: normKind(val(r, 'kind')) || dk, ...cad, homeDay: home, lastTouch: last, rhythmDate: last, notes: val(r, 'notes'),
             // only set flags and products when that column was matched, so an update doesn't wipe them
             ...(prospect !== undefined ? { prospect } : {}), ...(map.assigned >= 0 ? { assigned: normYes(val(r, 'assigned')) } : {}),
-            ...(val(r, 'products') ? { products: normProducts(val(r, 'products')) } : {}) };
+            ...Object.fromEntries(PICK_LISTS.filter(L => val(r, L.key)).map(L => [L.key, normList(val(r, L.key), L.setKey)])) };
         }).filter(Boolean);
       }
       function preview() {
@@ -1054,8 +1064,10 @@ function importDialog() {
       g('#im-go').onclick = async () => {
         if (!needDb()) return;
         const b = build(), upd = g('#im-up').checked;
-        const newCats = [...new Set(b.flatMap(c => c.products || []))].filter(x => !(set().productCategories || []).includes(x));
-        if (newCats.length) await saveSettings({ productCategories: [...(set().productCategories || []), ...newCats] }, true);
+        for (const L of PICK_LISTS) {
+          const cur = set()[L.setKey] || [], fresh = [...new Set(b.flatMap(c => c[L.key] || []))].filter(x => !cur.includes(x));
+          if (fresh.length) await saveSettings({ [L.setKey]: [...cur, ...fresh] }, true);
+        }
         const byName = new Map([...S.customers.values()].map(c => [custName(c).toLowerCase(), c]));
         const byId = new Map([...S.customers.values()].filter(c => c.custId).map(c => [String(c.custId).toLowerCase(), c]));
         g('#im-go').disabled = true;
@@ -1128,7 +1140,11 @@ $('#main').addEventListener('click', async e => {
     case 'open-cust': { const c = S.customers.get(id); if (c) customerDialog(c); break; }
     case 'new-cust': customerDialog(null); break;
     case 'import': importDialog(); break;
-    case 'cat-del': await saveSettings({ productCategories: (set().productCategories || []).filter(p => p !== t.dataset.v) }); render(); break;
+    case 'list-del': await saveSettings({ [t.dataset.k]: (set()[t.dataset.k] || []).filter(p => p !== t.dataset.v) }); render(); break;
+    case 'list-add': {
+      const inp = $('#add-' + t.dataset.k), v = inp.value.trim(), cur = set()[t.dataset.k] || []; if (!v) break;
+      if (!cur.some(x => x.toLowerCase() === v.toLowerCase())) await saveSettings({ [t.dataset.k]: [...cur, v] }); render(); break;
+    }
     case 'cfilter': S.filter = t.dataset.f; render(); break;
     case 'csort': S.sort = t.dataset.s; render(); break;
     case 'plan-one': { const c = S.customers.get(id); const sel = document.getElementById('pd-' + id); if (c) await planAdd([{ c, due: dueDate(c), day: sel ? sel.value : suggestDay(c, S.planWeek, dueDate(c)) }]); break; }
@@ -1150,6 +1166,7 @@ $('#main').addEventListener('click', async e => {
   }
 });
 $('#main').addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.mc')) { e.preventDefault(); e.target.click(); } });
+$('#main').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id?.startsWith('add-')) { e.preventDefault(); $(`[data-act="list-add"][data-k="${e.target.id.slice(4)}"]`)?.click(); } });
 $('#main').addEventListener('input', e => { if (e.target.id === 'cust-q') { S.q = e.target.value; render(); } });
 $('#main').addEventListener('change', e => {
   const el = e.target;
@@ -1218,6 +1235,11 @@ async function loadState() {
     S.fileCounts = st.fileCounts || {};
     S.user = st.user; S.status = 'ready';
     applyTheme(); requestRender();
+    // one time: brands typed into the old single competitor field join the Competitor brands list
+    if (!S.settings.competitorsSeeded) {
+      const cur = S.settings.competitors || [], old = [...new Set([...S.customers.values()].map(c => (c.competitor || '').trim()).filter(Boolean))];
+      saveSettings({ competitors: [...cur, ...old.filter(x => !cur.some(k => k.toLowerCase() === x.toLowerCase()))], competitorsSeeded: true }, true);
+    }
   } catch (e) { if (e.code !== 'unauth') console.error(e); }
 }
 function listen() {
