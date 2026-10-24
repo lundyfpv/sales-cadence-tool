@@ -377,3 +377,10 @@ a.btn.primary { color: var(--accent-ink); }
   --g-open: #86acf2; --g-open-soft: #1f3157; --g-assigned: #6fcf98; --g-assigned-soft: #163a2c; --g-prospect: #f2cb4f; --g-prospect-soft: #3d3310;
   color-scheme: dark;
 }
+
+/* drag a customer from Not scheduled onto the calendar */
+.mc.drop { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+[data-drag-cust] { cursor: grab; }
+[data-drag-cust].dragging { opacity: .5; }
+.grip { color: var(--muted); font-size: .8rem; letter-spacing: -2px; cursor: grab; user-select: none; }
+@media (hover: none) { .drag-hint, .grip { display: none; } }

@@ -405,7 +405,7 @@ function unscheduledPanel() {
   const when = ({ due, later }) => later ? `<span class="pill">Next ${niceShort(later.date)}</span>` : !due ? '<span class="pill warn">Never touched</span>' : due < t ? `<span class="pill bad">Overdue since ${niceShort(due)}</span>` : `<span class="pill">Due ${niceShort(due)}</span>`;
   return `<div class="panel"><div class="row"><h3>Not scheduled</h3><span class="spacer"></span><span class="pill ${rows.length ? 'warn' : 'ok'}">${rows.length}</span></div>
     <p class="muted small" style="margin:0">Nothing booked between today and ${niceShort(end)} (your ${n}-${set().defaultUnit === 'days' ? 'day' : 'week'} default cadence).</p>
-    ${rows.length ? `<div class="list unsched">${rows.map(x => `<div class="li"><div class="grow"><button class="linkbtn nm" data-act="open-cust" data-id="${x.c.id}">${esc(custName(x.c))}</button><div class="row small" style="gap:4px">${when(x)}${custTags(x.c)}</div></div><button class="btn sm" data-act="sched-cust" data-id="${x.c.id}">Schedule</button></div>`).join('')}</div>
+    ${rows.length ? `<p class="muted small drag-hint" style="margin:0">Drag a customer onto a day to schedule them.</p><div class="list unsched">${rows.map(x => `<div class="li" draggable="true" data-drag-cust="${x.c.id}" title="Drag onto a day"><span class="grip" aria-hidden="true">⋮⋮</span><div class="grow"><button class="linkbtn nm" data-act="open-cust" data-id="${x.c.id}">${esc(custName(x.c))}</button><div class="row small" style="gap:4px">${when(x)}${custTags(x.c)}</div></div><button class="btn sm" data-act="sched-cust" data-id="${x.c.id}">Schedule</button></div>`).join('')}</div>
     <button class="btn" data-act="goto" data-view="plan">Open Recap and Plan</button>` : '<div class="empty">Everyone has something booked.</div>'}
   </div>`;
 }
@@ -716,7 +716,7 @@ function apptDialog(a, preset = {}) {
   const c0 = S.customers.get(cid);
   const kind = a?.kind || c0?.kind || 'visit';
   const date = a?.date || preset.date || today();
-  const time = a ? a.time : (preset.time || (kind === 'visit' ? findSlot(date, +(c0?.duration || set().visitLength), c0?.preferredTime) : ''));
+  const time = a ? a.time : (preset.time !== undefined ? preset.time : (kind === 'visit' ? findSlot(date, +(c0?.duration || set().visitLength), c0?.preferredTime) : ''));
   if (!S.customers.size) { toast('Add a customer first.'); return; }
   const prevTasks = a && isOpen(a) ? actionItems(a).filter(i => i.from !== a) : [];
   openDialog(`
@@ -748,7 +748,7 @@ function apptDialog(a, preset = {}) {
         const w = dayWarnings(g('#ad-d').value || date, g('#ad-k').value, a?.id);
         g('#ad-w').innerHTML = w.map(x => `<div class="note warn">${esc(x)}</div>`).join('');
       };
-      g('#ad-c').onchange = () => { const c = S.customers.get(g('#ad-c').value); if (c && isNew) { g('#ad-k').value = c.kind || 'visit'; g('#ad-l').value = c.duration || set().visitLength; const due = dueDate(c); if (due && !preset.date) g('#ad-d').value = due < today() ? firstAllowedFrom(today(), c.kind) : due; if ((c.kind || 'visit') === 'visit' && !preset.time) g('#ad-t').value = findSlot(g('#ad-d').value, +g('#ad-l').value, c.preferredTime); } upd(); };
+      g('#ad-c').onchange = () => { const c = S.customers.get(g('#ad-c').value); if (c && isNew) { g('#ad-k').value = c.kind || 'visit'; g('#ad-l').value = c.duration || set().visitLength; const due = dueDate(c); if (due && !preset.date) g('#ad-d').value = due < today() ? firstAllowedFrom(today(), c.kind) : due; if ((c.kind || 'visit') === 'visit' && preset.time === undefined) g('#ad-t').value = findSlot(g('#ad-d').value, +g('#ad-l').value, c.preferredTime); } upd(); };
       g('#ad-d').onchange = upd; g('#ad-k').onchange = upd; upd();
       const cp = g('#ad-copy'); if (cp) cp.onclick = () => copyText(fill(set().recapTemplate, { ...a, recap: g('#ad-rc').value }), 'Recap copied. Paste it into your email.');
       g('#ad-save').onclick = async () => {
@@ -1225,6 +1225,32 @@ $('#main').addEventListener('change', e => {
     const name = el.dataset.setArr, vals = [...document.querySelectorAll(`[data-set-arr="${name}"]:checked`)].map(x => +x.value);
     saveSettings({ [name]: vals }).then(render);
   }
+});
+
+/* drag a customer from the Not scheduled list onto a Month day or a Week slot, then confirm the time */
+let dragCust = null;
+const dropTarget = el => el.closest('.mc[data-date], [data-col], [data-allday]');
+$('#main').addEventListener('dragstart', e => {
+  const li = e.target.closest?.('[data-drag-cust]'); if (!li) return;
+  dragCust = li.dataset.dragCust; e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData('text/plain', custName(S.customers.get(dragCust)));
+  li.classList.add('dragging');
+});
+$('#main').addEventListener('dragend', e => { dragCust = null; e.target.closest?.('[data-drag-cust]')?.classList.remove('dragging'); document.querySelectorAll('.drop').forEach(x => x.classList.remove('drop')); });
+$('#main').addEventListener('dragover', e => {
+  if (!dragCust) return; const t = dropTarget(e.target); if (!t) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+  document.querySelectorAll('.drop').forEach(x => x !== t && x.classList.remove('drop')); t.classList.add('drop');
+});
+$('#main').addEventListener('dragleave', e => { const t = dropTarget(e.target); if (t && !t.contains(e.relatedTarget)) t.classList.remove('drop'); });
+$('#main').addEventListener('drop', e => {
+  const c = dragCust && S.customers.get(dragCust), t = dropTarget(e.target); if (!c || !t) return;
+  e.preventDefault(); t.classList.remove('drop'); dragCust = null;
+  let date = t.dataset.date || t.dataset.allday || t.dataset.col, time;
+  if (t.dataset.allday) time = '';
+  else if (t.dataset.col) { const r = t.getBoundingClientRect(), gs = +set().gridStart || 7; time = fromMin(Math.floor(((e.clientY - r.top) / PX * 60 + gs * 60) / 30) * 30); }
+  // the dialog suggests a free time (their preferred time first) when the drop didn't pick one
+  apptDialog(null, { customerId: c.id, date, ...(time !== undefined ? { time } : {}) });
+  setTimeout(() => document.querySelector('#ad-t')?.focus(), 50);
 });
 
 /* drag and drop on the week grid */
