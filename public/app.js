@@ -534,6 +534,25 @@ async function planAdd(items) {
 }
 
 /* ============ CONFIRM (Monday) ============ */
+// The customer's most recent completed meeting before this appointment
+function lastMeeting(a) {
+  return [...S.appts.values()].filter(x => x.customerId === a.customerId && x.id !== a.id && x.status === 'completed' && x.date <= a.date)
+    .sort((x, y) => (y.date + (y.time || '')).localeCompare(x.date + (x.time || '')))[0] || null;
+}
+function prevRecapDialog(a) {
+  const p = lastMeeting(a); if (!p) return;
+  const items = lines(p.actions).map(t => ({ t, from: p, done: (p.actionsDone || []).includes(t) }));
+  openDialog(`
+    <div class="dlg-h"><h2>Last time with ${esc(apptName(a))}</h2><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="dlg-b">
+      <div class="muted small">${KINDS[p.kind] || 'Visit'} on ${nice(p.date)}${p.time ? ' · ' + t12(p.time) : ''}${p.recapSent ? ' · recap sent' : ''}</div>
+      <div><div class="label" style="margin-bottom:4px">Recap</div>${lines(p.recap).length ? `<ul class="recap-list">${lines(p.recap).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : '<div class="empty">No recap was written for that meeting.</div>'}</div>
+      ${items.length ? `<div><div class="label" style="margin-bottom:4px">My action items from it</div>${taskList(items, false)}</div>` : ''}
+      ${p.notes ? `<div><div class="label" style="margin-bottom:4px">Agenda / prep notes</div><div class="small" style="white-space:pre-wrap">${esc(p.notes)}</div></div>` : ''}
+    </div>
+    <div class="dlg-f"><button class="btn" id="pr-open">Open that appointment</button><span class="spacer"></span><button class="btn primary" data-close>Close</button></div>`,
+    (el, close) => { el.querySelector('#pr-open').onclick = () => { close(); apptDialog(p); }; });
+}
 function viewConfirm() {
   const t = today(), thisW = mondayOf(t);
   const ws = S.confirmWeek || (dow(t) === 5 || dow(t) === 6 || dow(t) === 0 ? addDays(thisW, 7) : thisW);
@@ -551,7 +570,7 @@ function viewConfirm() {
       return `<div class="card"><div class="row"><b style="flex:1;min-width:0">${esc(apptName(a))}</b><span class="pill ${a.status === 'confirmed' ? 'ok' : a.status === 'proposed' ? 'warn' : a.status === 'completed' ? '' : 'bad'}">${a.status}</span></div>
         <div class="meta"><span>${ICON[a.kind]} ${KINDS[a.kind]}${a.time ? ' · ' + t12(a.time) : ''}</span>${c.contact ? `<span>${esc(c.contact)}</span>` : ''}${c.phone ? `<span class="copyable">${esc(c.phone)}</span>` : ''}${c.email ? `<span class="copyable">${esc(c.email)}</span>` : ''}</div>
         ${isOpen(a) ? taskList(actionItems(a)) : ''}
-        ${isOpen(a) ? `<div class="row"><button class="btn sm" data-act="copy-confirm" data-id="${a.id}">Copy message</button>${a.status === 'proposed' ? `<button class="btn sm primary" data-act="confirm" data-id="${a.id}">Confirmed</button>` : `<button class="btn sm" data-act="unconfirm" data-id="${a.id}">Undo confirm</button>`}<button class="btn sm" data-act="open-appt" data-id="${a.id}">Move…</button><button class="btn sm danger" data-act="outcome" data-id="${a.id}" data-status="cancelled">Cancel</button></div>` : ''}
+        ${isOpen(a) ? `<div class="row"><button class="btn sm" data-act="copy-confirm" data-id="${a.id}">Copy message</button>${lastMeeting(a) ? `<button class="btn sm" data-act="prev-recap" data-id="${a.id}">Previous recap</button>` : ''}${a.status === 'proposed' ? `<button class="btn sm primary" data-act="confirm" data-id="${a.id}">Confirmed</button>` : `<button class="btn sm" data-act="unconfirm" data-id="${a.id}">Undo confirm</button>`}<button class="btn sm" data-act="open-appt" data-id="${a.id}">Move…</button><button class="btn sm danger" data-act="outcome" data-id="${a.id}" data-status="cancelled">Cancel</button></div>` : ''}
       </div>`;
     }).join('')}</div>`;
   }).join('') || '<div class="panel"><div class="empty">Nothing is scheduled that week yet. Fill it from Recap and Plan.</div><button class="btn" data-act="goto" data-view="plan">Open Recap and Plan</button></div>'}</div>`;
@@ -1158,6 +1177,7 @@ $('#main').addEventListener('click', async e => {
     } break;
     case 'recap-toggle': if (a && needDb()) await guard(aRef(a.id).update({ recapSent: !a.recapSent })); break;
     case 'copy-recap': if (a) copyText(fill(set().recapTemplate, a), 'Recap copied. Paste it into your email.'); break;
+    case 'prev-recap': if (a) prevRecapDialog(a); break;
     case 'copy-confirm': if (a) copyText(fill(set().confirmTemplate, a), 'Message copied.'); break;
     case 'export-week': exportWeek(); break;
     case 'theme-mode': await saveSettings({ theme: { ...DEFAULT_SETTINGS.theme, ...(set().theme || {}), mode: t.dataset.v } }); applyTheme(); render(); break;
