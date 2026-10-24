@@ -36,7 +36,7 @@ function applyTheme() { const th = { ...DEFAULT_SETTINGS.theme, ...(S.settings.t
 
 const DEFAULT_SETTINGS = {
   visitDays: [2, 3, 4], officeDays: [1, 5], dayStart: '08:30', dayEnd: '17:00', visitLength: 60, buffer: 30,
-  maxVisitsPerDay: 5, defaultCadence: 3, defaultUnit: 'weeks', autoNext: true, blackouts: [], gridStart: 7, gridEnd: 18,
+  maxVisitsPerDay: 5, defaultCadence: 4, defaultUnit: 'weeks', autoNext: true, blackouts: [], gridStart: 7, gridEnd: 18,
   signature: '',
   confirmTemplate: 'Hi {first}, just confirming our {kind} on {day} at {time}. Let me know if anything changes. Thanks, {me}',
   recapTemplate: 'Hi {first},\n\nThanks for your time on {day}. Quick recap:\n{recap}\n\nI\'ll touch base again around {next}.\n\nThanks,\n{me}',
@@ -85,7 +85,7 @@ function snap(s, kind) {
   return s;
 }
 function firstAllowedFrom(s, kind) { for (let i = 0; i < 28; i++) { const c = addDays(s, i); if (allowedDay(c, kind)) return c; } return s; }
-function cadenceDays(c) { const n = Math.max(1, +c.cadence || set().defaultCadence || 3); return c.unit === 'days' ? n : n * 7; }
+function cadenceDays(c) { const n = Math.max(1, +c.cadence || set().defaultCadence || 4); return c.unit === 'days' ? n : n * 7; }
 function hasHome(c) { return c.homeDay !== null && c.homeDay !== undefined && c.homeDay !== ''; }
 function nextDueFrom(c, base) {
   let d = addDays(base, cadenceDays(c));
@@ -364,7 +364,7 @@ function agenda(days) {
 }
 // Active customers with nothing scheduled between today and one default cadence from now
 function unscheduledPanel() {
-  const t = today(), n = +set().defaultCadence || 3, end = addDays(t, set().defaultUnit === 'days' ? n : n * 7);
+  const t = today(), n = +set().defaultCadence || 4, end = addDays(t, set().defaultUnit === 'days' ? n : n * 7);
   const rows = [...S.customers.values()].filter(c => c.active !== false && ![...S.appts.values()].some(a => a.customerId === c.id && isOpen(a) && a.date >= t && a.date <= end))
     .map(c => { const due = dueDate(c), later = openApptFor(c.id); return { c, due, later: later && later.date > end ? later : null }; })
     .sort((x, y) => (x.due || '0000').localeCompare(y.due || '0000') || custName(x.c).localeCompare(custName(y.c)));
@@ -809,7 +809,7 @@ function customerDialog(c) {
       const g = id => el.querySelector(id);
       const read = () => ({
         name: g('#cd-name').value.trim(), custId: g('#cd-custid').value.trim(), contact: g('#cd-contact').value.trim(), phone: g('#cd-phone').value.trim(), email: g('#cd-email').value.trim(), address: g('#cd-address').value.trim(),
-        kind: g('#cd-kind').value, cadence: Math.max(1, +g('#cd-cad').value || 3), unit: g('#cd-unit').value, homeDay: g('#cd-home').value === '' ? '' : +g('#cd-home').value,
+        kind: g('#cd-kind').value, cadence: Math.max(1, +g('#cd-cad').value || set().defaultCadence || 4), unit: g('#cd-unit').value, homeDay: g('#cd-home').value === '' ? '' : +g('#cd-home').value,
         preferredTime: g('#cd-time').value, duration: +g('#cd-dur').value || set().visitLength, rhythmDate: g('#cd-rhythm').value, notes: g('#cd-notes').value, active: g('#cd-active').checked,
         prospect: g('#cd-prospect').checked, assigned: g('#cd-assigned').checked, competitor: g('#cd-comp').value.trim(),
         products: [...el.querySelectorAll('#cd-prods input:checked')].map(x => x.value),
@@ -1029,7 +1029,7 @@ function importDialog() {
         preview();
       }
       function build() {
-        const dk = g('#im-dk').value, dc = Math.max(1, +g('#im-dc').value || 3), du = g('#im-du').value;
+        const dk = g('#im-dk').value, dc = Math.max(1, +g('#im-dc').value || set().defaultCadence || 4), du = g('#im-du').value;
         const val = (r, f) => map[f] >= 0 ? String(r[map[f]] ?? '').trim() : '';
         return rows.map(r => {
           const name = val(r, 'name') || val(r, 'contact'); if (!name) return null;
