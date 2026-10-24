@@ -24,6 +24,11 @@ Alec, a field sales rep, set it up and is its admin (his account is TSM + Admin)
 - `server/auth.js`: scrypt password hashing, sessions (only token hashes are stored), TOTP, and login throttling.
 - `server/acme.js`: a minimal RFC 8555 client (ES256 JWS, DER CSR builder, HTTP-01).
 - `public/app.js`: the whole planner UI. Writes go through `S.db.collection(...).doc(id).set/update/delete`, a shim over `/api/docs/:coll/:id`. Live updates come over SSE at `/api/events`, which makes the page re-fetch `/api/state`.
+- Speed (built for 30+ daily users; check with `scripts/load-test/`, see the README):
+  - In app.js, don't loop over `S.appts` per customer or per day. Use `apptsFor(customerId)`, which is sorted oldest first, or `apptsDated(date)`. Both read `IX()`, an index that resets on any change to the `ApptMap` and on every `render()`.
+  - Long lists show a page at a time: customers 150 per page (`S.custLimit`), and Not scheduled 50 rows.
+  - The server gzips JSON over 1.4 KB and static text files.
+  - Format dates with the cached `Intl.DateTimeFormat` instances (`fmtNice` / `fmtShort`), not `toLocaleDateString`.
 - `public/admin.*`, `public/login.*`: the admin and login pages. `theme.js` applies light/dark mode and the accent color before first paint.
 
 ## Accounts

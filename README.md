@@ -133,3 +133,16 @@ In the hosted trial, go to Customers → **Export** to save a CSV. Then here, go
 ```sh
 npm run dev      # http://localhost:8080, data in ./data
 ```
+
+### Load testing
+
+`scripts/load-test/` builds a database the size of a 37-person team and times it. That's 1 admin, 1 director, 5 RSMs and 30 TSMs, with 4,650 customers and about 121,000 appointments. Use an empty folder, never your real data:
+
+```sh
+node --disable-warning=ExperimentalWarning scripts/load-test/seed.js /tmp/cadence-load
+DATA_DIR=/tmp/cadence-load HTTP_PORT=8090 HTTPS_PORT=8453 node server/index.js &
+node scripts/load-test/measure.mjs http://localhost:8090      # /api/state size and time per role
+node scripts/load-test/measure-ui.cjs http://localhost:8090   # draw time per screen (needs Playwright installed)
+```
+
+On that data a director's `/api/state` is about 44 MB raw and 1.4 MB gzipped, returned in about 0.7 s. Every screen draws in under 0.1 s, except the admin's whole-company Recap and Plan, which takes about 0.2 s.

@@ -13,8 +13,11 @@ function weekStartOf(s) { const st = +S.settings.weekStart === 1 ? 1 : 0; return
 function diffDays(a, b) { return Math.round((toD(b) - toD(a)) / 86400000); }
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-function nice(s) { return s ? toD(s).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : ''; }
-function niceShort(s) { return s ? toD(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''; }
+// formatters are made once: toLocaleDateString builds a new one on every call, which adds up over thousands of rows
+const fmtNice = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+const fmtShort = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+function nice(s) { return s ? fmtNice.format(toD(s)) : ''; }
+function niceShort(s) { return s ? fmtShort.format(toD(s)) : ''; }
 function toMin(t) { if (!t) return 0; const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); }
 function fromMin(n) { n = Math.max(0, Math.min(23 * 60 + 45, Math.round(n))); return pad(Math.floor(n / 60)) + ':' + pad(n % 60); }
 function t12(t) { if (!t) return ''; let [h, m] = t.split(':').map(Number); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return h + ':' + pad(m) + ' ' + ap; }
@@ -45,16 +48,23 @@ const DEFAULT_SETTINGS = {
 };
 
 /* ============ state ============ */
+// appointments live in an ApptMap so any change drops the customer/date index (see IX())
+let apptIndex = null;
+class ApptMap extends Map {
+  set(k, v) { apptIndex = null; return super.set(k, v); }
+  delete(k) { apptIndex = null; return super.delete(k); }
+}
 const S = {
-  db: null, dl: null, status: 'connecting', customers: new Map(), appts: new Map(), settings: { ...DEFAULT_SETTINGS },
+  db: null, dl: null, status: 'connecting', customers: new Map(), appts: new ApptMap(), settings: { ...DEFAULT_SETTINGS },
   view: 'week', anchor: today(), monthAnchor: today(), planWeek: null, confirmWeek: null,
   q: '', filter: 'all', sort: 'next', loaded: { c: false, a: false, s: false }, mobile: false, fileCounts: {}, user: null,
-  raw: { customers: [], appointments: [] }, users: [], roles: {}, canEditCompany: true, viewAs: 'me', directory: [], notifications: [],
+  raw: { customers: [], appointments: [] }, users: [], roles: {}, canEditCompany: true, viewAs: 'me', directory: [], notifications: [], custLimit: 150,
 };
 const VIEWS = [['week', 'Week'], ['month', 'Month'], ['plan', 'Recap and Plan', 'Fri'], ['confirm', 'Confirm', 'Mon'], ['customers', 'Customers'], ['settings', 'Settings']];
 try { const v = localStorage.getItem('cb.view'); if (v && VIEWS.some(x => x[0] === v)) S.view = v; S.viewAs = localStorage.getItem('cb.viewAs') || 'me'; } catch (e) {}
 
 const set = () => S.settings;
+const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
 const custName = c => c ? (c.name || c.contact || 'Unnamed') : 'Removed customer';
 const apptName = a => { const c = S.customers.get(a.customerId); return c ? custName(c) : (a.name || 'Removed customer'); };
 const isOpen = a => a.status === 'proposed' || a.status === 'confirmed';
@@ -63,7 +73,9 @@ const lines = s => String(s || '').split('\n').map(l => l.trim().replace(/^[-•
 // My action items for an upcoming appointment: those logged at the customer's last meeting before it, plus any added to it directly.
 // A missed or cancelled meeting with no items of its own doesn't clear the ones from before it.
 function actionItems(a) {
-  const prev = [...S.appts.values()].filter(x => x.customerId === a.customerId && x.id !== a.id && !isOpen(x) && x.date <= a.date && (x.status === 'completed' || lines(x.actions).length)).sort((x, y) => y.date.localeCompare(x.date))[0];
+  const list = apptsFor(a.customerId);
+  let prev = null;
+  for (let i = list.length - 1; i >= 0 && !prev; i--) { const x = list[i]; if (x.id !== a.id && !isOpen(x) && x.date <= a.date && (x.status === 'completed' || lines(x.actions).length)) prev = x; }
   const mk = from => lines(from.actions).map(t => ({ t, from, done: (from.actionsDone || []).includes(t) }));
   return [...(prev ? mk(prev) : []), ...mk(a)];
 }
@@ -74,12 +86,14 @@ const mentionRe = u => new RegExp('(^|[^A-Za-z0-9_.@-])@' + reEsc(u) + '(?![A-Za
 // escape text for HTML and show @username as a highlighted name
 function withMentions(t) {
   let h = esc(t);
+  if (!h.includes('@')) return h; // nothing to tag; skips a regex per person on every line
   for (const u of S.directory) h = h.replace(mentionRe(esc(u.username)), (m, pre) => `${pre}<span class="mention" title="@${esc(u.username)}">@${esc(u.name || u.username)}</span>`);
   return h;
 }
 // customers never see the tags: drop @username from text going into an email
 function stripMentions(t) {
   let out = String(t || '');
+  if (!out.includes('@')) return out;
   for (const u of S.directory) out = out.replace(mentionRe(u.username), '$1');
   return out.split('\n').map(l => l.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:!?])/g, '$1').trim()).join('\n');
 }
@@ -141,10 +155,14 @@ function usHolidays(y) {
     [thanks, 'Thanksgiving', true], [addDays(thanks, 1), 'Day after Thanksgiving', true], [obs(ymd(11, 25)), 'Christmas Day', true],
   ].map(([date, name, block]) => ({ date, name, block }));
 }
+const holidayByDate = new Map(); // date -> holiday or null, so the many due-date checks don't rebuild lists
 function holidayOn(s) {
   if (set().usHolidays === false || !s) return null;
-  const y = +s.slice(0, 4); // New Year's can be observed on Dec 31 of the year before
-  return [...usHolidays(y), ...usHolidays(y + 1)].find(h => h.date === s) || null;
+  if (!holidayByDate.has(s)) {
+    const y = +s.slice(0, 4); // New Year's can be observed on Dec 31 of the year before
+    holidayByDate.set(s, [...usHolidays(y), ...usHolidays(y + 1)].find(h => h.date === s) || null);
+  }
+  return holidayByDate.get(s);
 }
 function isBlackout(s) { return (set().blackouts || []).some(b => s >= b.start && s <= (b.end || b.start)) || !!holidayOn(s)?.block; }
 function blackoutLabel(s) { const b = (set().blackouts || []).find(b => s >= b.start && s <= (b.end || b.start)); if (b) return b.label || 'Blocked'; const h = holidayOn(s); return h?.block ? h.name : ''; }
@@ -171,17 +189,29 @@ function nextDueFrom(c, base) {
   return snap(d, c.kind);
 }
 function dueDate(c) { return c.rhythmDate ? nextDueFrom(c, c.rhythmDate) : null; }
-function openApptFor(cid, exceptId) {
-  let best = null;
-  for (const a of S.appts.values()) if (a.customerId === cid && a.id !== exceptId && isOpen(a) && (!best || a.date < best.date)) best = a;
-  return best;
+/* Appointments indexed by customer and by date, so screens never scan every appointment per customer or per day
+   (with a whole company loaded that was hundreds of millions of checks per redraw). Rebuilt on the next use after
+   appointments change (ApptMap.set/delete), the Viewing picker changes, or a redraw starts. */
+const byWhenAsc = (x, y) => x.date < y.date ? -1 : x.date > y.date ? 1 : (x.time || '') < (y.time || '') ? -1 : (x.time || '') > (y.time || '') ? 1 : 0;
+function IX() {
+  if (apptIndex) return apptIndex;
+  const byCust = new Map(), byDate = new Map();
+  for (const a of S.appts.values()) {
+    (byCust.get(a.customerId) || byCust.set(a.customerId, []).get(a.customerId)).push(a);
+    (byDate.get(a.date) || byDate.set(a.date, []).get(a.date)).push(a);
+  }
+  for (const list of byCust.values()) list.sort(byWhenAsc);
+  return apptIndex = { byCust, byDate };
 }
+const apptsFor = cid => IX().byCust.get(cid) || [];
+const apptsDated = date => IX().byDate.get(date) || [];
+function openApptFor(cid, exceptId) { return apptsFor(cid).find(a => a.id !== exceptId && isOpen(a)) || null; }
 // Calendar color group: prospects yellow, assigned accounts green, everyone else blue
 const custGroup = c => c?.prospect ? 'prospect' : c?.assigned ? 'assigned' : 'open';
 // A prospect is going cold once they've had coldAfter follow-ups (done or missed) since becoming a prospect
 function isCold(c) {
   if (!c?.prospect || c.active === false) return false;
-  const n = [...S.appts.values()].filter(a => a.customerId === c.id && (a.status === 'completed' || a.status === 'missed') && a.date >= (c.prospectSince || '')).length;
+  const n = apptsFor(c.id).filter(a => (a.status === 'completed' || a.status === 'missed') && a.date >= (c.prospectSince || '')).length;
   return n >= (+set().coldAfter || 4);
 }
 const custTags = c => `${c.prospect ? ' <span class="pill prospect">Prospect</span>' : c.assigned ? ' <span class="pill assigned">Assigned</span>' : ''}${isCold(c) ? ' <span class="pill bad">Going cold</span>' : ''}`;
@@ -209,9 +239,9 @@ function customerState(c) {
   if (due <= addDays(t, 13)) return { cls: 'warn', text: 'Due ' + niceShort(due), rank: 3, sortDate: due };
   return { cls: '', text: 'Due ' + niceShort(due), rank: 5, sortDate: due };
 }
-function visitsOn(date, extra = []) { return [...S.appts.values(), ...extra].filter(a => a.date === date && a.kind === 'visit' && a.status !== 'cancelled'); }
+function visitsOn(date, extra = []) { return [...apptsDated(date), ...extra].filter(a => a.date === date && a.kind === 'visit' && a.status !== 'cancelled'); }
 function findSlot(date, dur, pref, extra = [], exceptId) {
-  const busy = [...S.appts.values(), ...extra].filter(a => a.date === date && a.time && a.status !== 'cancelled' && a.id !== exceptId)
+  const busy = [...apptsDated(date), ...extra].filter(a => a.date === date && a.time && a.status !== 'cancelled' && a.id !== exceptId)
     .map(a => [toMin(a.time), toMin(a.time) + (+a.duration || 60)]);
   const buf = +set().buffer || 0;
   const free = s => busy.every(([b, e]) => s + dur + buf <= b || s >= e + buf);
@@ -362,6 +392,7 @@ let renderQueued = false, dragging = null, pendingRender = false;
 function requestRender() { if (dragging) { pendingRender = true; return; } if (renderQueued) return; renderQueued = true; requestAnimationFrame(() => { renderQueued = false; render(); }); }
 
 function render() {
+  apptIndex = null; // records can be edited in place, so each redraw starts from a fresh index
   if (dragging) { pendingRender = true; return; }
   S.mobile = window.matchMedia('(max-width: 760px)').matches;
   renderTabs(); syncText();
@@ -383,7 +414,7 @@ function chip(a, extra = '') {
 
 /* ============ WEEK ============ */
 function weekDays(start) { if (!S.settings.showWeekend) start = mondayOf(addDays(start, 1)); const n = S.settings.showWeekend ? 7 : 5; return Array.from({ length: n }, (_, i) => addDays(start, i)); }
-function apptsOn(date) { return [...S.appts.values()].filter(a => a.date === date && (a.status !== 'cancelled')); }
+function apptsOn(date) { return apptsDated(date).filter(a => a.status !== 'cancelled'); }
 function viewWeek() {
   const ws = weekStartOf(S.anchor), days = weekDays(ws), t = today();
   const thisW = weekStartOf(t), nextW = addDays(thisW, 7);
@@ -452,13 +483,13 @@ function agenda(days) {
 // Active customers with nothing scheduled between today and one default cadence from now
 function unscheduledPanel() {
   const t = today(), n = +set().defaultCadence || 4, end = addDays(t, set().defaultUnit === 'days' ? n : n * 7);
-  const rows = [...S.customers.values()].filter(c => c.active !== false && ![...S.appts.values()].some(a => a.customerId === c.id && isOpen(a) && a.date >= t && a.date <= end))
+  const rows = [...S.customers.values()].filter(c => c.active !== false && !apptsFor(c.id).some(a => isOpen(a) && a.date >= t && a.date <= end))
     .map(c => { const due = dueDate(c), later = openApptFor(c.id); return { c, due, later: later && later.date > end ? later : null }; })
-    .sort((x, y) => (x.due || '0000').localeCompare(y.due || '0000') || custName(x.c).localeCompare(custName(y.c)));
+    .sort((x, y) => (x.due || '0000').localeCompare(y.due || '0000') || collator.compare(custName(x.c), custName(y.c)));
   const when = ({ due, later }) => later ? `<span class="pill">Next ${niceShort(later.date)}</span>` : !due ? '<span class="pill warn">Never touched</span>' : due < t ? `<span class="pill bad">Overdue since ${niceShort(due)}</span>` : `<span class="pill">Due ${niceShort(due)}</span>`;
   return `<div class="panel"><div class="row"><h3>Not scheduled</h3><span class="spacer"></span><span class="pill ${rows.length ? 'warn' : 'ok'}">${rows.length}</span></div>
     <p class="muted small" style="margin:0">Nothing booked between today and ${niceShort(end)} (your ${n}-${set().defaultUnit === 'days' ? 'day' : 'week'} default cadence).</p>
-    ${rows.length ? `<p class="muted small drag-hint" style="margin:0">Drag a customer onto a day to schedule them.</p><div class="list unsched">${rows.map(x => `<div class="li" draggable="true" data-drag-cust="${x.c.id}" title="Drag onto a day"><span class="grip" aria-hidden="true">⋮⋮</span><div class="grow"><button class="linkbtn nm" data-act="open-cust" data-id="${x.c.id}">${esc(custName(x.c))}</button><div class="row small" style="gap:4px">${when(x)}${custTags(x.c)}</div></div><button class="btn sm" data-act="sched-cust" data-id="${x.c.id}">Schedule</button></div>`).join('')}</div>
+    ${rows.length ? `<p class="muted small drag-hint" style="margin:0">Drag a customer onto a day to schedule them.</p><div class="list unsched">${rows.slice(0, 50).map(x => `<div class="li" draggable="true" data-drag-cust="${x.c.id}" title="Drag onto a day"><span class="grip" aria-hidden="true">⋮⋮</span><div class="grow"><button class="linkbtn nm" data-act="open-cust" data-id="${x.c.id}">${esc(custName(x.c))}</button><div class="row small" style="gap:4px">${when(x)}${custTags(x.c)}</div></div><button class="btn sm" data-act="sched-cust" data-id="${x.c.id}">Schedule</button></div>`).join('')}${rows.length > 50 ? `<div class="muted small" style="padding:8px 0">…and ${rows.length - 50} more, oldest due first. Recap and Plan has the full list.</div>` : ''}</div>
     <button class="btn" data-act="goto" data-view="plan">Open Recap and Plan</button>` : '<div class="empty">Everyone has something booked.</div>'}
   </div>`;
 }
@@ -589,8 +620,9 @@ async function planAdd(items) {
 /* ============ CONFIRM (Monday) ============ */
 // The customer's most recent completed meeting before this appointment
 function lastMeeting(a) {
-  return [...S.appts.values()].filter(x => x.customerId === a.customerId && x.id !== a.id && x.status === 'completed' && x.date <= a.date)
-    .sort((x, y) => (y.date + (y.time || '')).localeCompare(x.date + (x.time || '')))[0] || null;
+  const list = apptsFor(a.customerId);
+  for (let i = list.length - 1; i >= 0; i--) { const x = list[i]; if (x.id !== a.id && x.status === 'completed' && x.date <= a.date) return x; }
+  return null;
 }
 function prevRecapDialog(a) {
   const p = lastMeeting(a); if (!p) return;
@@ -630,27 +662,32 @@ function viewConfirm() {
 }
 
 /* ============ CUSTOMERS ============ */
+const CUST_PAGE = 150;
 function viewCustomers() {
   const q = S.q.trim().toLowerCase();
-  let list = [...S.customers.values()].map(c => ({ c, st: customerState(c) }));
+  const all = [...S.customers.values()].map(c => ({ c, st: customerState(c) }));
+  let list = all;
   if (q) list = list.filter(({ c }) => [c.name, c.custId, c.contact, c.email, c.phone, c.address, c.notes, ...PICK_LISTS.map(L => pickVals(c, L).join(' '))].some(v => String(v || '').toLowerCase().includes(q)));
   if (S.filter === 'visit') list = list.filter(x => (x.c.kind || 'visit') === 'visit');
   if (S.filter === 'touch') list = list.filter(x => isTouch(x.c.kind));
   if (S.filter === 'attn') list = list.filter(x => x.st.rank <= 3);
   if (S.filter === 'prospect') list = list.filter(x => x.c.prospect);
   if (S.filter === 'assigned') list = list.filter(x => x.c.assigned && !x.c.prospect);
-  if (S.sort === 'name') list.sort((a, b) => custName(a.c).localeCompare(custName(b.c)));
-  else list.sort((a, b) => a.st.rank - b.st.rank || a.st.sortDate.localeCompare(b.st.sortDate) || custName(a.c).localeCompare(custName(b.c)));
+  if (S.sort === 'name') list.sort((a, b) => collator.compare(custName(a.c), custName(b.c)));
+  else list.sort((a, b) => a.st.rank - b.st.rank || a.st.sortDate.localeCompare(b.st.sortDate) || collator.compare(custName(a.c), custName(b.c)));
   const ex = [...S.customers.values()].some(c => c.example);
-  const attn = [...S.customers.values()].filter(c => customerState(c).rank <= 3).length;
+  const attn = all.filter(x => x.st.rank <= 3).length;
+  // a long list draws in pages; search and the filters still cover everyone
+  const shown = list.slice(0, S.custLimit), more = list.length - shown.length;
   return `<div class="toolbar"><h2>Customers</h2><input class="search" id="cust-q" type="search" placeholder="Search name, ID, contact, city…" value="${esc(S.q)}" aria-label="Search customers">
     <div class="seg">${[['all', 'All'], ['attn', `Needs attention${attn ? ' (' + attn + ')' : ''}`], ['prospect', 'Prospects'], ['assigned', 'Assigned'], ['visit', 'Visits'], ['touch', 'Calls & emails']].map(([k, l]) => `<button data-act="cfilter" data-f="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}</div>
     <span class="spacer"></span><button class="btn" data-act="import">Import</button><button class="btn" data-act="export-cust">Export</button><button class="btn primary" data-act="new-cust">+ Customer</button></div>
   ${ex ? `<div class="note warn row" style="margin-bottom:12px"><span style="flex:1;min-width:0">The customers marked “example” are sample data so you can see how things work. Delete them when you're ready to bring in your own.</span><button class="btn sm" data-act="clear-examples">Delete examples</button></div>` : ''}
   ${S.customers.size === 0 ? `<div class="panel" style="max-width:560px"><h3>No customers yet</h3><p class="muted" style="margin:0">Import a spreadsheet or CSV from your CRM, paste rows copied from Excel, or add customers one at a time. Everyone starts on a ${set().defaultCadence}-week cadence, and you can change any of them.</p><div class="row"><button class="btn primary" data-act="import">Import customers</button><button class="btn" data-act="new-cust">Add one</button></div></div>` : `
   <div class="tbl-wrap"><table class="ctable"><thead><tr><th><button class="linkbtn label" data-act="csort" data-s="name">Customer${S.sort === 'name' ? ' ↓' : ''}</button></th><th>Type</th><th>Cadence</th><th>Day</th><th>Last touch</th><th><button class="linkbtn label" data-act="csort" data-s="next">Next${S.sort === 'next' ? ' ↓' : ''}</button></th></tr></thead><tbody>
-  ${list.map(({ c, st }) => `<tr data-act="open-cust" data-id="${c.id}" class="${c.active === false ? 'paused' : ''}"><td><b>${esc(custName(c))}</b>${custTags(c)}${c.example ? ' <span class="pill">example</span>' : ''}<div class="sub">${esc([S.viewAs === 'team' && c.owner && userName(c.owner), c.custId && '#' + c.custId, c.contact, c.address, (c.products || []).join(', ')].filter(Boolean).join(' · '))}</div></td><td><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span></td><td>${cadenceLabel(c)}</td><td>${hasHome(c) ? DAYS[+c.homeDay] : '<span class="muted">—</span>'}</td><td>${c.lastTouch ? niceShort(c.lastTouch) : '<span class="muted">—</span>'}</td><td><span class="pill ${st.cls}">${st.text}</span></td></tr>`).join('')}
-  </tbody></table>${list.length ? '' : '<div class="empty" style="padding:14px">No customers match.</div>'}</div>`}`;
+  ${shown.map(({ c, st }) => `<tr data-act="open-cust" data-id="${c.id}" class="${c.active === false ? 'paused' : ''}"><td><b>${esc(custName(c))}</b>${custTags(c)}${c.example ? ' <span class="pill">example</span>' : ''}<div class="sub">${esc([S.viewAs === 'team' && c.owner && userName(c.owner), c.custId && '#' + c.custId, c.contact, c.address, (c.products || []).join(', ')].filter(Boolean).join(' · '))}</div></td><td><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span></td><td>${cadenceLabel(c)}</td><td>${hasHome(c) ? DAYS[+c.homeDay] : '<span class="muted">—</span>'}</td><td>${c.lastTouch ? niceShort(c.lastTouch) : '<span class="muted">—</span>'}</td><td><span class="pill ${st.cls}">${st.text}</span></td></tr>`).join('')}
+  </tbody></table>${list.length ? '' : '<div class="empty" style="padding:14px">No customers match.</div>'}</div>
+  ${more > 0 ? `<div class="row" style="justify-content:center;margin-top:10px"><span class="muted small">Showing ${shown.length} of ${list.length}</span><button class="btn" data-act="cust-more">Show ${Math.min(more, CUST_PAGE)} more</button></div>` : ''}`}`;
 }
 
 /* ============ SETTINGS ============ */
@@ -724,7 +761,7 @@ function openDialog(html, bind, onClose, wide) {
   return close;
 }
 function customerOptions(sel) {
-  return [...S.customers.values()].sort((a, b) => custName(a).localeCompare(custName(b))).map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(custName(c))}${c.active === false ? ' (paused)' : ''}</option>`).join('');
+  return [...S.customers.values()].sort((a, b) => collator.compare(custName(a), custName(b))).map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(custName(c))}${c.active === false ? ' (paused)' : ''}</option>`).join('');
 }
 function fmtBytes(n) { return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
 function filesBlock(apptId) {
@@ -885,7 +922,7 @@ function outcomeDialog(a, preStatus) {
 function customerDialog(c) {
   const isNew = !c;
   c = c || { kind: 'visit', cadence: set().defaultCadence, unit: set().defaultUnit, homeDay: '', active: true, duration: set().visitLength };
-  const hist = isNew ? [] : [...S.appts.values()].filter(a => a.customerId === c.id).sort((a, b) => b.date.localeCompare(a.date));
+  const hist = isNew ? [] : apptsFor(c.id).slice().reverse();
   const st = isNew ? null : customerState(c);
   const due = isNew ? null : dueDate(c);
   openDialog(`
@@ -966,7 +1003,7 @@ function customerDialog(c) {
         del.onclick = async () => {
           if (!del.dataset.armed) { del.dataset.armed = 1; del.textContent = 'Click again: deletes customer and their upcoming appointments'; del.classList.add('solid'); return; }
           close();
-          for (const a of [...S.appts.values()].filter(a => a.customerId === c.id && isOpen(a))) { await guard(aRef(a.id).delete()); S.appts.delete(a.id); }
+          for (const a of apptsFor(c.id).filter(a => isOpen(a))) { await guard(aRef(a.id).delete()); S.appts.delete(a.id); }
           await guard(cRef(c.id).delete(), 'Customer deleted.'); S.customers.delete(c.id); render();
         };
       }
@@ -1043,7 +1080,7 @@ function exportWeek() {
 }
 function exportCustomers() {
   const head = ['Name', 'Customer ID', 'Prospect', 'Assigned', 'Currently buying', 'Competitor brands', 'Distributors', 'Contact', 'Phone', 'Email', 'Address', 'Type', 'Cadence', 'Unit', 'Day', 'Preferred time', 'Last touch', 'Last on-rhythm date', 'Next due', 'Active', 'Notes'];
-  const lines = [head.join(',')].concat([...S.customers.values()].sort((a, b) => custName(a).localeCompare(custName(b))).map(c => [c.name, c.custId, c.prospect ? 'Yes' : 'No', c.assigned ? 'Yes' : 'No', ...PICK_LISTS.map(L => pickVals(c, L).join('; ')), c.contact, c.phone, c.email, c.address, KINDS[c.kind || 'visit'], c.cadence, c.unit || 'weeks', hasHome(c) ? DAYS_LONG[+c.homeDay] : '', c.preferredTime, c.lastTouch, c.rhythmDate, dueDate(c) || '', c.active === false ? 'No' : 'Yes', c.notes].map(csvCell).join(',')));
+  const lines = [head.join(',')].concat([...S.customers.values()].sort((a, b) => collator.compare(custName(a), custName(b))).map(c => [c.name, c.custId, c.prospect ? 'Yes' : 'No', c.assigned ? 'Yes' : 'No', ...PICK_LISTS.map(L => pickVals(c, L).join('; ')), c.contact, c.phone, c.email, c.address, KINDS[c.kind || 'visit'], c.cadence, c.unit || 'weeks', hasHome(c) ? DAYS_LONG[+c.homeDay] : '', c.preferredTime, c.lastTouch, c.rhythmDate, dueDate(c) || '', c.active === false ? 'No' : 'Yes', c.notes].map(csvCell).join(',')));
   offerFile(`customers-${today()}.csv`, lines.join('\r\n'));
 }
 
@@ -1250,7 +1287,8 @@ $('#main').addEventListener('click', async e => {
       const inp = $('#add-' + t.dataset.k), v = inp.value.trim(), cur = set()[t.dataset.k] || []; if (!v) break;
       if (!cur.some(x => x.toLowerCase() === v.toLowerCase())) await saveSettings({ [t.dataset.k]: [...cur, v] }); render(); break;
     }
-    case 'cfilter': S.filter = t.dataset.f; render(); break;
+    case 'cfilter': S.filter = t.dataset.f; S.custLimit = CUST_PAGE; render(); break;
+    case 'cust-more': S.custLimit += CUST_PAGE; render(); break;
     case 'csort': S.sort = t.dataset.s; render(); break;
     case 'plan-one': { const c = S.customers.get(id); const sel = document.getElementById('pd-' + id); if (c) await planAdd([{ c, due: dueDate(c), day: sel ? sel.value : suggestDay(c, S.planWeek, dueDate(c)) }]); break; }
     case 'plan-all': { const items = planCandidates(S.planWeek).map(x => { const sel = document.getElementById('pd-' + x.c.id); return { ...x, day: sel ? sel.value : x.day }; }); await planAdd(items); break; }
@@ -1272,7 +1310,7 @@ $('#main').addEventListener('click', async e => {
 });
 $('#main').addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.mc')) { e.preventDefault(); e.target.click(); } });
 $('#main').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id?.startsWith('add-')) { e.preventDefault(); $(`[data-act="list-add"][data-k="${e.target.id.slice(4)}"]`)?.click(); } });
-$('#main').addEventListener('input', e => { if (e.target.id === 'cust-q') { S.q = e.target.value; render(); } });
+$('#main').addEventListener('input', e => { if (e.target.id === 'cust-q') { S.q = e.target.value; S.custLimit = CUST_PAGE; render(); } });
 $('#main').addEventListener('change', e => {
   const el = e.target;
   if (el.dataset.set) {
@@ -1414,7 +1452,7 @@ const roleLabel = u => (S.roles[u.role] || u.role) + (u.admin && u.role !== 'adm
 function applyView() {
   const o = viewOwner(), mine = x => !o || x.owner === o;
   S.customers = new Map(S.raw.customers.filter(mine).map(c => [c.id, c]));
-  S.appts = new Map(S.raw.appointments.filter(mine).map(a => [a.id, a]));
+  S.appts = new ApptMap(S.raw.appointments.filter(mine).map(a => [a.id, a])); apptIndex = null;
 }
 function drawViewAs() {
   if (S.user.photo) $('#menu-btn').innerHTML = `<img class="avatar" src="/api/users/${S.user.id}/photo?v=${S.user.photo}" alt="">`;
@@ -1437,7 +1475,7 @@ async function loadState() {
     S.status = 'ready';
     applyTheme(); requestRender();
     // one time: brands typed into the old single competitor field join the Competitor brands list
-    if (!S.settings.competitorsSeeded) {
+    if (!S.settings.competitorsSeeded && S.canEditCompany) { // only they can save it; anyone else would retry on every reload
       const cur = S.settings.competitors || [], old = [...new Set([...S.customers.values()].map(c => (c.competitor || '').trim()).filter(Boolean))];
       saveSettings({ competitors: [...cur, ...old.filter(x => !cur.some(k => k.toLowerCase() === x.toLowerCase()))], competitorsSeeded: true }, true);
     }

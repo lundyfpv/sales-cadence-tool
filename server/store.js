@@ -42,6 +42,8 @@ addColumn('users', 'is_admin', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('users', 'photo', 'INTEGER'); // when the profile photo was last set (also busts caches); null = none
 addColumn('docs', 'owner', 'TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS docs_owner ON docs(owner)');
+// loading someone's records reads by owner and type together
+db.exec('CREATE INDEX IF NOT EXISTS docs_owner_coll ON docs(owner, coll)');
 db.exec(`
   CREATE TABLE IF NOT EXISTS notifications (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, from_id TEXT, appt_id TEXT, field TEXT, text TEXT,
