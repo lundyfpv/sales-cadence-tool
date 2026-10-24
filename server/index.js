@@ -5,6 +5,7 @@ const tls = require('tls');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const store = require('./store');
 const auth = require('./auth');
 const acme = require('./acme');
@@ -27,10 +28,20 @@ function baseHeaders(res, req) {
   res.setHeader('Permissions-Policy', 'camera=(self), geolocation=(), microphone=()');
   if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
 }
+const acceptsGzip = req => !!req && /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
 function send(res, status, body, headers = {}) {
   const isBuf = Buffer.isBuffer(body) || typeof body === 'string';
   const data = isBuf ? body : JSON.stringify(body);
-  res.writeHead(status, { 'Content-Type': isBuf ? 'text/plain; charset=utf-8' : 'application/json', 'Cache-Control': 'no-store', ...headers });
+  const head = { 'Content-Type': isBuf ? 'text/plain; charset=utf-8' : 'application/json', 'Cache-Control': 'no-store', ...headers };
+  // JSON shrinks about tenfold; compressing off the main thread keeps a big /api/state from stalling other requests
+  if (!isBuf && data.length > 1400 && acceptsGzip(res.req)) {
+    return zlib.gzip(data, { level: 5 }, (err, gz) => {
+      if (err) { res.writeHead(status, head); return res.end(data); }
+      res.writeHead(status, { ...head, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding', 'Content-Length': gz.length });
+      res.end(gz);
+    });
+  }
+  res.writeHead(status, head);
   res.end(data);
 }
 const fail = (res, status, error, code) => send(res, status, { error, code });
@@ -113,11 +124,19 @@ function serveStatic(req, res, rel) {
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) return fail(res, 404, 'Not found');
     const ext = path.extname(file).toLowerCase();
-    const etag = `"${st.size.toString(36)}-${st.mtimeMs.toString(36)}"`;
+    // text files go out gzipped when the browser accepts it (app.js is ~4x smaller); the ETag differs per encoding
+    const gz = ['.js', '.css', '.html', '.webmanifest', '.svg', '.json', '.txt'].includes(ext) && acceptsGzip(req);
+    const etag = `"${st.size.toString(36)}-${st.mtimeMs.toString(36)}${gz ? '-gz' : ''}"`;
     const headers = { 'Content-Type': TYPES[ext] || 'application/octet-stream', ETag: etag, 'Cache-Control': ['.png', '.woff2', '.ico'].includes(ext) ? 'public, max-age=604800' : 'no-cache' };
     if (ext === '.html') headers['Content-Security-Policy'] = CSP;
     if (rel === '/sw.js') headers['Service-Worker-Allowed'] = '/';
+    if (gz || ['.js', '.css', '.html', '.webmanifest', '.svg', '.json', '.txt'].includes(ext)) headers.Vary = 'Accept-Encoding';
     if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); return res.end(); }
+    if (gz) {
+      res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip' });
+      if (req.method === 'HEAD') return res.end();
+      return fs.createReadStream(file).pipe(zlib.createGzip({ level: 6 })).pipe(res);
+    }
     res.writeHead(200, { ...headers, 'Content-Length': st.size });
     if (req.method === 'HEAD') return res.end();
     fs.createReadStream(file).pipe(res);
