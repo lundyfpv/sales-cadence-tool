@@ -28,6 +28,7 @@ Alec, a field sales rep, set it up and is its admin (his account is TSM + Admin)
   - In app.js, don't loop over `S.appts` per customer or per day. Use `apptsFor(customerId)`, which is sorted oldest first, or `apptsDated(date)`. Both read `IX()`, an index that resets on any change to the `ApptMap` and on every `render()`.
   - Long lists show a page at a time: customers 150 per page (`S.custLimit`), and Not scheduled 50 rows.
   - The server gzips JSON over 1.4 KB and static text files.
+  - Live updates are targeted: `store.bump(audience)` only tells the browsers that can see the change. That means the records' owners, their managers up the chain and admins, plus anyone named directly. `writeDoc` collects who that is, and `audience()` (server/index.js) works it out. Call `bump()` with no argument for changes everyone sees, like people, photos and company lists.
   - Format dates with the cached `Intl.DateTimeFormat` instances (`fmtNice` / `fmtShort`), not `toLocaleDateString`.
 - `public/admin.*`, `public/login.*`: the admin and login pages. `theme.js` applies light/dark mode and the accent color before first paint.
 
