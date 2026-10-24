@@ -36,7 +36,7 @@ function applyTheme() { const th = { ...DEFAULT_SETTINGS.theme, ...(S.settings.t
 
 const DEFAULT_SETTINGS = {
   visitDays: [2, 3, 4], officeDays: [1, 5], dayStart: '08:30', dayEnd: '17:00', visitLength: 60, buffer: 30,
-  maxVisitsPerDay: 5, defaultCadence: 3, defaultUnit: 'weeks', autoNext: true, blackouts: [], gridStart: 7, gridEnd: 18,
+  maxVisitsPerDay: 5, defaultCadence: 4, defaultUnit: 'weeks', autoNext: true, blackouts: [], gridStart: 7, gridEnd: 18,
   signature: '',
   confirmTemplate: 'Hi {first}, just confirming our {kind} on {day} at {time}. Let me know if anything changes. Thanks, {me}',
   recapTemplate: 'Hi {first},\n\nThanks for your time on {day}. Quick recap:\n{recap}\n\nI\'ll touch base again around {next}.\n\nThanks,\n{me}',
@@ -85,7 +85,7 @@ function snap(s, kind) {
   return s;
 }
 function firstAllowedFrom(s, kind) { for (let i = 0; i < 28; i++) { const c = addDays(s, i); if (allowedDay(c, kind)) return c; } return s; }
-function cadenceDays(c) { const n = Math.max(1, +c.cadence || set().defaultCadence || 3); return c.unit === 'days' ? n : n * 7; }
+function cadenceDays(c) { const n = Math.max(1, +c.cadence || set().defaultCadence || 4); return c.unit === 'days' ? n : n * 7; }
 function hasHome(c) { return c.homeDay !== null && c.homeDay !== undefined && c.homeDay !== ''; }
 function nextDueFrom(c, base) {
   let d = addDays(base, cadenceDays(c));
@@ -312,8 +312,8 @@ function viewWeek() {
   if (S.mobile) return tb + `<div class="week-wrap">${agenda(days)}${side}</div>`;
   return tb + `<div class="week-wrap"><div class="cal">${weekGrid(days)}${legend()}</div>${side}</div>`;
 }
-function legend() {
-  return `<div class="legend"><span><i class="g-assigned"></i>Assigned account</span><span><i class="g-open"></i>Not assigned</span><span><i class="g-prospect"></i>Prospect</span><span><i class="g-open s-proposed"></i>Proposed</span><span><i style="background:var(--surface-2)"></i>Done</span><span><i style="background:var(--red-soft)"></i>Missed</span><span><i style="background:var(--office)"></i>Office day</span><span class="spacer"></span><span>Drag to move · click an empty slot to add</span></div>`;
+function legend(hint = 'Drag to move · click an empty slot to add') {
+  return `<div class="legend"><span><i class="g-assigned"></i>Assigned account</span><span><i class="g-open"></i>Not assigned</span><span><i class="g-prospect"></i>Prospect</span><span><i class="g-open s-proposed"></i>Proposed</span><span><i style="background:var(--surface-2)"></i>Done</span><span><i style="background:var(--red-soft)"></i>Missed</span><span><i style="background:var(--office)"></i>Office day</span><span class="spacer"></span><span>${hint}</span></div>`;
 }
 const PX = 44;
 function weekGrid(days) {
@@ -362,11 +362,23 @@ function agenda(days) {
     </section>`;
   }).join('')}</div>`;
 }
+// Active customers with nothing scheduled between today and one default cadence from now
+function unscheduledPanel() {
+  const t = today(), n = +set().defaultCadence || 4, end = addDays(t, set().defaultUnit === 'days' ? n : n * 7);
+  const rows = [...S.customers.values()].filter(c => c.active !== false && ![...S.appts.values()].some(a => a.customerId === c.id && isOpen(a) && a.date >= t && a.date <= end))
+    .map(c => { const due = dueDate(c), later = openApptFor(c.id); return { c, due, later: later && later.date > end ? later : null }; })
+    .sort((x, y) => (x.due || '0000').localeCompare(y.due || '0000') || custName(x.c).localeCompare(custName(y.c)));
+  const when = ({ due, later }) => later ? `<span class="pill">Next ${niceShort(later.date)}</span>` : !due ? '<span class="pill warn">Never touched</span>' : due < t ? `<span class="pill bad">Overdue since ${niceShort(due)}</span>` : `<span class="pill">Due ${niceShort(due)}</span>`;
+  return `<div class="panel"><div class="row"><h3>Not scheduled</h3><span class="spacer"></span><span class="pill ${rows.length ? 'warn' : 'ok'}">${rows.length}</span></div>
+    <p class="muted small" style="margin:0">Nothing booked between today and ${niceShort(end)} (your ${n}-${set().defaultUnit === 'days' ? 'day' : 'week'} default cadence).</p>
+    ${rows.length ? `<div class="list unsched">${rows.map(x => `<div class="li"><div class="grow"><button class="linkbtn nm" data-act="open-cust" data-id="${x.c.id}">${esc(custName(x.c))}</button><div class="row small" style="gap:4px">${when(x)}${custTags(x.c)}</div></div><button class="btn sm" data-act="sched-cust" data-id="${x.c.id}">Schedule</button></div>`).join('')}</div>
+    <button class="btn" data-act="goto" data-view="plan">Open Recap and Plan</button>` : '<div class="empty">Everyone has something booked.</div>'}
+  </div>`;
+}
 function weekSide(ws, days) {
   const end = addDays(ws, 6), t = today();
   const touches = [...S.appts.values()].filter(a => isTouch(a.kind) && a.date >= ws && a.date <= end && a.status !== 'cancelled').sort((a, b) => a.date.localeCompare(b.date));
   const stale = [...S.appts.values()].filter(a => isOpen(a) && a.date < t).sort((a, b) => a.date.localeCompare(b.date));
-  const dueNot = [...S.customers.values()].filter(c => c.active !== false && !openApptFor(c.id)).map(c => ({ c, due: dueDate(c) })).filter(x => !x.due || x.due <= end).length;
   return `<aside class="side">
     <div class="panel"><div class="row"><h3>Calls, emails & texts</h3><span class="spacer"></span><span class="pill touch">${touches.filter(a => a.status !== 'completed').length} open</span></div>
       <div class="list">${touches.length ? touches.map(a => {
@@ -376,7 +388,7 @@ function weekSide(ws, days) {
       }).join('') : '<div class="empty">No calls or emails due this week.</div>'}</div></div>
     ${stale.length ? `<div class="panel"><div class="row"><h3>Needs an outcome</h3><span class="spacer"></span><span class="pill bad">${stale.length}</span></div><p class="muted small" style="margin:0">These dates have passed but weren't marked done or missed. Until you log them, the next one won't be scheduled.</p>
       <div class="list">${stale.slice(0, 8).map(a => `<div class="li"><div class="grow"><div class="nm">${esc(apptName(a))}</div><div class="muted small">${KINDS[a.kind]} · ${nice(a.date)}</div></div><button class="btn sm" data-act="outcome" data-id="${a.id}">Log</button></div>`).join('')}</div></div>` : ''}
-    <div class="panel"><h3>Coming up</h3><p class="muted small" style="margin:0">${dueNot ? `${dueNot} customer${dueNot === 1 ? ' is' : 's are'} due by ${niceShort(end)} with nothing scheduled.` : 'Every customer due this week has something scheduled.'}</p>${dueNot ? `<button class="btn" data-act="goto" data-view="plan">Open Recap and Plan</button>` : ''}</div>
+    ${unscheduledPanel()}
   </aside>`;
 }
 
@@ -384,14 +396,14 @@ function weekSide(ws, days) {
 function viewMonth() {
   const a = toD(S.monthAnchor), first = fmt(new Date(a.getFullYear(), a.getMonth(), 1, 12));
   const start = weekStartOf(first), t = today(), m = a.getMonth();
-  let h = `<div class="toolbar"><h2 class="mtitle">${a.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h2><div class="seg"><button data-act="mo" data-d="-1" aria-label="Previous month">‹</button><button data-act="mo-today">Today</button><button data-act="mo" data-d="1" aria-label="Next month">›</button></div><span class="spacer"></span><span class="muted small">Click a day to open its week</span></div><div class="month">`;
+  let h = `<div class="toolbar"><h2 class="mtitle">${a.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h2><div class="seg"><button data-act="mo" data-d="-1" aria-label="Previous month">‹</button><button data-act="mo-today">Today</button><button data-act="mo" data-d="1" aria-label="Next month">›</button></div></div><div class="week-wrap"><div class="cal"><div class="month">`;
   h += Array.from({ length: 7 }, (_, i) => DAYS[dow(addDays(start, i))]).map(d => `<div class="mh">${d}</div>`).join('');
   for (let i = 0; i < 42; i++) {
     const d = addDays(start, i), w = dow(d), items = apptsOn(d).sort((x, y) => (x.time || '') < (y.time || '') ? -1 : 1);
     const bl = blackoutLabel(d);
     h += `<div class="mc ${toD(d).getMonth() !== m ? 'out' : ''} ${set().officeDays.includes(w) ? 'office' : ''} ${bl ? 'blk' : ''} ${d === t ? 'today' : ''}" data-act="mo-day" data-date="${d}" role="button" tabindex="0" aria-label="${nice(d)}, ${items.length} items"><span class="n">${toD(d).getDate()}${bl ? ` <span class="pill bad" style="font-size:.62rem">${esc(bl)}</span>` : ''}</span>${items.slice(0, 4).map(x => chip(x, 'tabindex="-1"')).join('')}${items.length > 4 ? `<span class="muted small">+${items.length - 4} more</span>` : ''}</div>`;
   }
-  return h + `</div>`;
+  return h + `</div>${legend('Click a day to open its week')}</div><aside class="side">${unscheduledPanel()}</aside></div>`;
 }
 
 /* ============ PLAN (Friday) ============ */
@@ -797,7 +809,7 @@ function customerDialog(c) {
       const g = id => el.querySelector(id);
       const read = () => ({
         name: g('#cd-name').value.trim(), custId: g('#cd-custid').value.trim(), contact: g('#cd-contact').value.trim(), phone: g('#cd-phone').value.trim(), email: g('#cd-email').value.trim(), address: g('#cd-address').value.trim(),
-        kind: g('#cd-kind').value, cadence: Math.max(1, +g('#cd-cad').value || 3), unit: g('#cd-unit').value, homeDay: g('#cd-home').value === '' ? '' : +g('#cd-home').value,
+        kind: g('#cd-kind').value, cadence: Math.max(1, +g('#cd-cad').value || set().defaultCadence || 4), unit: g('#cd-unit').value, homeDay: g('#cd-home').value === '' ? '' : +g('#cd-home').value,
         preferredTime: g('#cd-time').value, duration: +g('#cd-dur').value || set().visitLength, rhythmDate: g('#cd-rhythm').value, notes: g('#cd-notes').value, active: g('#cd-active').checked,
         prospect: g('#cd-prospect').checked, assigned: g('#cd-assigned').checked, competitor: g('#cd-comp').value.trim(),
         products: [...el.querySelectorAll('#cd-prods input:checked')].map(x => x.value),
@@ -1017,7 +1029,7 @@ function importDialog() {
         preview();
       }
       function build() {
-        const dk = g('#im-dk').value, dc = Math.max(1, +g('#im-dc').value || 3), du = g('#im-du').value;
+        const dk = g('#im-dk').value, dc = Math.max(1, +g('#im-dc').value || set().defaultCadence || 4), du = g('#im-du').value;
         const val = (r, f) => map[f] >= 0 ? String(r[map[f]] ?? '').trim() : '';
         return rows.map(r => {
           const name = val(r, 'name') || val(r, 'contact'); if (!name) return null;
@@ -1112,6 +1124,7 @@ $('#main').addEventListener('click', async e => {
     case 'week-start': await saveSettings({ weekStart: +t.dataset.v }); render(); break;
     case 'theme-accent': await saveSettings({ theme: { ...DEFAULT_SETTINGS.theme, ...(set().theme || {}), accent: t.dataset.v } }); applyTheme(); render(); break;
     case 'export-cust': exportCustomers(); break;
+    case 'sched-cust': { const c = S.customers.get(id); if (c) { const dd = dueDate(c); apptDialog(null, { customerId: c.id, date: dd && dd >= today() ? dd : firstAllowedFrom(today(), c.kind) }); } break; }
     case 'open-cust': { const c = S.customers.get(id); if (c) customerDialog(c); break; }
     case 'new-cust': customerDialog(null); break;
     case 'import': importDialog(); break;

@@ -353,3 +353,7 @@ a.btn.primary { color: var(--accent-ink); }
 #menu-themes .tick { width: 16px; display: inline-flex; color: var(--accent); }
 #menu-themes button[aria-pressed="true"] { font-weight: 700; }
 .menu-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+
+/* month grid inside the .cal card (the card draws the border) */
+.cal .month { border: 0; border-radius: 0; }
+.unsched { max-height: 440px; overflow-y: auto; }
