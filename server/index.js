@@ -64,13 +64,17 @@ const canEditCompany = user => auth.isAdmin(user) || auth.rank(user.role) >= aut
 
 // One write to customers, appointments or settings, limited to records the user can see.
 // New customers go to `owner` when given (a manager adding for a team member); new appointments go to their customer's owner.
-function writeDoc(user, owners, op, coll, id, data, owner) {
+// `seen` collects who has to hear about the change (see audience()); its `all` flag means everyone.
+function writeDoc(user, owners, op, coll, id, data, owner, seen) {
   if (!store.COLLECTIONS.has(coll) || !idOk(id)) throw Object.assign(new Error('Unknown record.'), { status: 400 });
   if (coll === 'config') {
     if (id !== 'settings') throw forbidden();
     if (op === 'delete') throw forbidden();
-    const cur = store.settingsFor(user.id);
-    store.saveSettings(user.id, op === 'update' ? { ...cur, ...data } : data, canEditCompany(user));
+    const cur = store.settingsFor(user.id), next = op === 'update' ? { ...cur, ...data } : data;
+    store.saveSettings(user.id, next, canEditCompany(user));
+    // a change to a company-wide list reaches everyone; personal settings only this person's other tabs and devices
+    if (canEditCompany(user) && store.COMPANY_KEYS.some(k => k in next && JSON.stringify(next[k]) !== JSON.stringify(cur[k]))) seen.all = true;
+    else seen.users.add(user.id);
     return;
   }
   const cur = store.docOwner(coll, id);
@@ -80,10 +84,23 @@ function writeDoc(user, owners, op, coll, id, data, owner) {
     if (co !== undefined && !owners.includes(co)) throw forbidden();
     if (cur === undefined && co !== undefined) owner = co;
   }
+  if (cur !== undefined) seen.owners.add(cur);
   if (op === 'delete') { if (cur !== undefined) store.deleteDoc(coll, id); return; }
   if (op === 'update') { if (cur === undefined || !store.patchDoc(coll, id, data)) throw Object.assign(new Error('That record no longer exists.'), { status: 404 }); }
   else store.putDoc(coll, id, data, cur !== undefined ? cur : (owner && owners.includes(owner) ? owner : user.id));
-  if (coll === 'appointments' && data && Object.keys(MENTION_FIELDS).some(f => f in data)) notifyMentions(user, id);
+  seen.owners.add(store.docOwner(coll, id));
+  if (coll === 'appointments' && data && Object.keys(MENTION_FIELDS).some(f => f in data)) for (const u of notifyMentions(user, id)) seen.users.add(u);
+}
+const newSeen = () => ({ all: false, owners: new Set(), users: new Set() });
+// Who sees a change: the records' owners, everyone above them in the chain, admins, and anyone named directly (a new @mention, or whoever changed their own settings).
+// Everyone else's screen can't show those records, so their browsers aren't told to reload.
+function audience(seen) {
+  if (seen.all) return undefined;
+  const users = auth.allUsers(), byId = new Map(users.map(u => [u.id, u])), out = new Set(seen.users);
+  const walked = new Set();
+  for (let id of seen.owners) { while (id != null && !walked.has(id)) { walked.add(id); out.add(id); id = byId.get(id)?.manager_id; } }
+  if (walked.size) for (const u of users) if (auth.isAdmin(u)) out.add(u.id);
+  return out;
 }
 /* ---------- @mentions ---------- */
 // "@username" in an appointment's agenda, recap or action items notifies that person once per field.
@@ -101,9 +118,9 @@ const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // a username can contain . _ @ -, so match each known username rather than guessing where a mention ends
 const mentioned = (text, u) => new RegExp('(^|[^A-Za-z0-9_.@-])@' + reEsc(u.username) + '(?![A-Za-z0-9_@-]|\\.[A-Za-z0-9])', 'i').test(text);
 function notifyMentions(author, apptId) {
-  const a = store.getDoc('appointments', apptId); if (!a) return;
+  const a = store.getDoc('appointments', apptId); if (!a) return [];
   const cust = a.customerId ? store.getDoc('customers', a.customerId) : null;
-  const people = auth.allUsers().filter(u => u.active && u.id !== author.id);
+  const people = auth.allUsers().filter(u => u.active && u.id !== author.id), told = [];
   for (const [field, label] of Object.entries(MENTION_FIELDS)) {
     const text = String(a[field] || ''); if (!text.includes('@')) continue;
     for (const u of people) {
@@ -112,8 +129,10 @@ function notifyMentions(author, apptId) {
       // keep the lines that mention them (or the start of the text) so the note reads on its own
       const lines = text.split('\n').filter(l => mentioned(l, u));
       nq.add.run(crypto.randomUUID(), u.id, author.id, apptId, label, (lines.length ? lines.join('\n') : text).slice(0, 600), cust ? (cust.name || cust.contact || '') : (a.name || ''), a.date || '', Date.now());
+      told.push(u.id);
     }
   }
+  return told;
 }
 const apptVisible = (owners, apptId) => { const o = store.docOwner('appointments', apptId); return o !== undefined && owners.includes(o); };
 
@@ -144,9 +163,9 @@ function serveStatic(req, res, rel) {
 }
 
 /* ---------- live updates (server-sent events) ---------- */
-const streams = new Set();
-store.listeners.add(rev => { for (const s of streams) s.write(`data: ${rev}\n\n`); });
-setInterval(() => { for (const s of streams) s.write(': ping\n\n'); }, 25000).unref();
+const streams = new Map(); // response -> user id
+store.listeners.add((rev, who) => { for (const [s, uid] of streams) if (!who || who.has(uid)) s.write(`data: ${rev}\n\n`); });
+setInterval(() => { for (const s of streams.keys()) s.write(': ping\n\n'); }, 25000).unref();
 
 /* ---------- ACME job state ---------- */
 const job = { running: false, log: [], error: null, finished: null };
@@ -265,7 +284,7 @@ async function handle(req, res) {
     if (p === '/api/events' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       res.write(`retry: 4000\ndata: ${store.getRev()}\n\n`);
-      streams.add(res); req.on('close', () => streams.delete(res));
+      streams.set(res, user.id); req.on('close', () => streams.delete(res));
       return;
     }
 
@@ -276,20 +295,21 @@ async function handle(req, res) {
       if (op) {
         const b = op === 'delete' ? null : await readJson(req);
         if (b !== null && (!b || typeof b !== 'object' || Array.isArray(b))) return fail(res, 400, 'Invalid record.');
-        writeDoc(user, owners, op, coll, id, b, url.searchParams.get('owner'));
-        store.bump(); return send(res, 200, { ok: true });
+        const seen = newSeen();
+        writeDoc(user, owners, op, coll, id, b, url.searchParams.get('owner'), seen);
+        store.bump(audience(seen)); return send(res, 200, { ok: true });
       }
     }
     if (p === '/api/batch' && req.method === 'POST') {
       const b = await readJson(req);
-      const writes = Array.isArray(b.writes) ? b.writes.slice(0, 2000) : [];
+      const writes = Array.isArray(b.writes) ? b.writes.slice(0, 2000) : [], seen = newSeen();
       store.transaction(() => {
         for (const w of writes) {
           if (!['set', 'update', 'delete'].includes(w.op) || (w.op !== 'delete' && (!w.data || typeof w.data !== 'object'))) continue;
-          writeDoc(user, owners, w.op, w.coll, w.id, w.data, w.owner);
+          writeDoc(user, owners, w.op, w.coll, w.id, w.data, w.owner, seen);
         }
       });
-      store.bump();
+      store.bump(audience(seen));
       return send(res, 200, { ok: true, count: writes.length });
     }
 
@@ -318,14 +338,14 @@ async function handle(req, res) {
         out.on('finish', resolve); out.on('error', reject); req.on('error', reject);
       }).catch(e => { try { fs.unlinkSync(dest); } catch {} throw e; });
       store.q.addFile.run(id, appt, name, mime, size, Date.now());
-      store.bump();
+      store.bump(audience({ owners: [store.docOwner('appointments', appt)], users: [] }));
       return send(res, 200, { id, name, size, mime });
     }
     m = p.match(/^\/api\/files\/([0-9a-f-]{36})$/);
     if (m) {
       const f = store.q.getFile.get(m[1]);
       if (!f || !apptVisible(owners, f.appt_id)) return fail(res, 404, 'File not found.');
-      if (req.method === 'DELETE') { store.removeFile(f.id); store.bump(); return send(res, 200, { ok: true }); }
+      if (req.method === 'DELETE') { store.removeFile(f.id); store.bump(audience({ owners: [store.docOwner('appointments', f.appt_id)], users: [] })); return send(res, 200, { ok: true }); }
       if (req.method === 'GET') {
         const file = path.join(store.UPLOAD_DIR, f.id);
         if (!fs.existsSync(file)) return fail(res, 404, 'File is missing from storage.');
@@ -449,7 +469,7 @@ async function handle(req, res) {
     if (p === '/api/notifications/read' && req.method === 'POST') {
       const b = await readJson(req);
       if (b.all) nq.readAll.run(user.id); else for (const id of (Array.isArray(b.ids) ? b.ids : []).slice(0, 200)) nq.read.run(user.id, String(id));
-      store.bump(); return send(res, 200, { ok: true });
+      store.bump(new Set([user.id])); return send(res, 200, { ok: true });
     }
 
     /* ---- people: accounts, roles and who reports to whom ---- */

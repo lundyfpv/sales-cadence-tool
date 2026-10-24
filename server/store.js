@@ -83,9 +83,10 @@ function kvSet(k, v) { q.setKv.run(k, JSON.stringify(v)); }
 function kvDel(k) { q.delKv.run(k); }
 
 // A revision number lets open browsers know something changed.
+// `audience` is the set of user ids whose screens it affects; leave it out to tell everyone.
 let rev = kvGet('rev', 0);
 const listeners = new Set();
-function bump() { rev += 1; kvSet('rev', rev); for (const fn of listeners) { try { fn(rev); } catch {} } }
+function bump(audience) { rev += 1; kvSet('rev', rev); for (const fn of listeners) { try { fn(rev, audience); } catch {} } }
 
 // What one user loads: customers and appointments owned by anyone in `owners`, plus their settings.
 function state(owners, userId) {
