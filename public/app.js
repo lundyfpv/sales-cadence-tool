@@ -1216,12 +1216,16 @@ function listen() {
 }
 /* account menu */
 const menuBtn = $('#menu-btn'), menuPop = $('#menu-pop');
-menuBtn.onclick = e => { e.stopPropagation(); menuPop.hidden = !menuPop.hidden; menuBtn.setAttribute('aria-expanded', !menuPop.hidden); if (!menuPop.hidden) $('#menu-who').textContent = 'Signed in as ' + (S.user?.username || ''); };
+menuBtn.onclick = e => { e.stopPropagation(); menuPop.hidden = !menuPop.hidden; menuBtn.setAttribute('aria-expanded', !menuPop.hidden); if (!menuPop.hidden) { $('#menu-who').textContent = 'Signed in as ' + (S.user?.username || ''); drawThemeMenu(); } };
 document.addEventListener('click', e => { if (!menuPop.hidden && !menuPop.contains(e.target)) { menuPop.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); } });
-$('#menu-theme').onclick = async () => {
-  const th = { ...DEFAULT_SETTINGS.theme, ...(set().theme || {}) };
-  const dark = th.mode === 'dark' || th.mode === 'oled' || (th.mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
-  await saveSettings({ theme: { ...th, mode: dark ? 'light' : 'dark' } }); applyTheme(); render();
+const THEME_MODES = [['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark'], ['oled', 'OLED black']];
+const drawThemeMenu = () => {
+  const mode = { ...DEFAULT_SETTINGS.theme, ...(set().theme || {}) }.mode;
+  $('#menu-themes').innerHTML = THEME_MODES.map(([k, l]) => `<button data-mode="${k}" aria-pressed="${mode === k}"><span class="tick">${mode === k ? ICON.check : ''}</span>${l}</button>`).join('');
+};
+$('#menu-themes').onclick = async e => {
+  const b = e.target.closest('[data-mode]'); if (!b) return;
+  await saveSettings({ theme: { ...DEFAULT_SETTINGS.theme, ...(set().theme || {}), mode: b.dataset.mode } }); applyTheme(); drawThemeMenu(); render();
 };
 $('#menu-out').onclick = async () => { try { await api('POST', '/api/logout'); } catch (e) {} location.href = '/login'; };
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
