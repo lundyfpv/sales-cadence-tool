@@ -56,11 +56,11 @@ class ApptMap extends Map {
 }
 const S = {
   db: null, dl: null, status: 'connecting', customers: new Map(), appts: new ApptMap(), settings: { ...DEFAULT_SETTINGS },
-  view: 'week', anchor: today(), monthAnchor: today(), planWeek: null, confirmWeek: null,
+  view: 'week', anchor: today(), monthAnchor: today(), planWeek: null,
   q: '', filter: 'all', sort: 'next', loaded: { c: false, a: false, s: false }, mobile: false, fileCounts: {}, user: null,
   raw: { customers: [], appointments: [] }, users: [], roles: {}, canEditCompany: true, viewAs: 'me', directory: [], notifications: [], custLimit: 150,
 };
-const VIEWS = [['week', 'Week'], ['month', 'Month'], ['plan', 'Recap and Plan', 'Fri'], ['confirm', 'Confirm', 'Mon'], ['customers', 'Customers'], ['settings', 'Settings']];
+const VIEWS = [['week', 'Week'], ['month', 'Month'], ['plan', 'Recap and Plan', 'Fri'], ['customers', 'Customers'], ['settings', 'Settings']];
 try { const v = localStorage.getItem('cb.view'); if (v && VIEWS.some(x => x[0] === v)) S.view = v; S.viewAs = localStorage.getItem('cb.viewAs') || 'me'; } catch (e) {}
 
 const set = () => S.settings;
@@ -399,7 +399,7 @@ function render() {
   const ae = document.activeElement, aid = ae && ae.id && $('#main').contains(ae) ? ae.id : null;
   let sel = null; try { if (aid && ae.selectionStart != null) sel = [ae.selectionStart, ae.selectionEnd]; } catch (e) {}
   const main = $('#main');
-  main.innerHTML = ({ week: viewWeek, month: viewMonth, plan: viewPlan, confirm: viewConfirm, customers: viewCustomers, settings: viewSettings }[S.view] || viewWeek)();
+  main.innerHTML = ({ week: viewWeek, month: viewMonth, plan: viewPlan, customers: viewCustomers, settings: viewSettings }[S.view] || viewWeek)();
   if (aid) { const el = document.getElementById(aid); if (el) { el.focus(); try { sel && el.setSelectionRange(sel[0], sel[1]); } catch (e) {} } }
   if (S.view === 'week' && !S.mobile) { const sc = $('.cal-body'); if (sc && !render._scrolled) { render._scrolled = true; } }
 }
@@ -498,6 +498,7 @@ function weekSide(ws, days) {
   const touches = [...S.appts.values()].filter(a => isTouch(a.kind) && a.date >= ws && a.date <= end && a.status !== 'cancelled').sort((a, b) => a.date.localeCompare(b.date));
   const stale = [...S.appts.values()].filter(a => isOpen(a) && a.date < t).sort((a, b) => a.date.localeCompare(b.date));
   return `<aside class="side">
+    ${confirmPanel(days)}
     <div class="panel"><div class="row"><h3>Calls, emails & texts</h3><span class="spacer"></span><span class="pill touch">${touches.filter(a => a.status !== 'completed').length} open</span></div>
       <div class="list">${touches.length ? touches.map(a => {
         const c = S.customers.get(a.customerId);
@@ -506,8 +507,28 @@ function weekSide(ws, days) {
       }).join('') : '<div class="empty">No calls or emails due this week.</div>'}</div></div>
     ${stale.length ? `<div class="panel"><div class="row"><h3>Needs an outcome</h3><span class="spacer"></span><span class="pill bad">${stale.length}</span></div><p class="muted small" style="margin:0">These dates have passed but weren't marked done or missed. Until you log them, the next one won't be scheduled.</p>
       <div class="list">${stale.slice(0, 8).map(a => `<div class="li"><div class="grow"><div class="nm">${esc(apptName(a))}</div><div class="muted small">${KINDS[a.kind]} · ${nice(a.date)}</div></div><button class="btn sm" data-act="outcome" data-id="${a.id}">Log</button></div>`).join('')}</div></div>` : ''}
-    ${unscheduledPanel()}
   </aside>`;
+}
+// Confirming the shown week's visits (Monday's job): contact details, the message to copy, and Confirmed / Move / Cancel
+function confirmPanel(days) {
+  const t = today();
+  const items = days.filter(d => d >= t).flatMap(d => apptsOn(d).filter(a => isOpen(a) && (a.kind === 'visit' || a.time)).sort((a, b) => (a.time || '') < (b.time || '') ? -1 : 1));
+  const conf = items.filter(a => a.status === 'confirmed').length;
+  let lastDay = '';
+  return `<div class="panel"><div class="row"><h3>Confirm visits</h3><span class="spacer"></span>${items.length ? `<span class="pill ${conf === items.length ? 'ok' : 'warn'}">${conf} of ${items.length}</span>` : ''}</div>
+    ${items.length ? `<div class="list">${items.map(a => {
+      const c = S.customers.get(a.customerId) || {}, head = a.date !== lastDay ? `<div class="cday">${DAYS_LONG[dow(a.date)]} ${niceShort(a.date)}</div>` : '';
+      lastDay = a.date;
+      if (a.status === 'confirmed') return head + `<div class="li"><span class="pill ok" title="Confirmed">${ICON.check}</span><div class="grow"><button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button><div class="muted small">${a.time ? t12(a.time) : 'Any time'}${c.contact ? ' · ' + esc(c.contact) : ''}</div></div><button class="btn sm ghost" data-act="unconfirm" data-id="${a.id}">Undo</button></div>`;
+      return head + `<div class="li start cf"><div class="grow">
+        <button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button>
+        <div class="muted small">${ICON[a.kind]} ${a.time ? t12(a.time) : 'Any time'}${c.contact ? ' · ' + esc(c.contact) : ''}</div>
+        ${c.phone || c.email ? `<div class="muted small">${[c.phone, c.email].filter(Boolean).map(v => `<span class="copyable">${esc(v)}</span>`).join(' · ')}</div>` : ''}
+        ${taskList(actionItems(a))}
+        <div class="row" style="gap:6px;margin-top:6px"><button class="btn sm primary" data-act="confirm" data-id="${a.id}">Confirmed</button><button class="btn sm" data-act="copy-confirm" data-id="${a.id}">Copy message</button>${lastMeeting(a) ? `<button class="btn sm" data-act="prev-recap" data-id="${a.id}">Previous recap</button>` : ''}<button class="btn sm" data-act="open-appt" data-id="${a.id}">Move…</button><button class="btn sm danger" data-act="outcome" data-id="${a.id}" data-status="cancelled">Cancel</button></div>
+      </div></div>`;
+    }).join('')}</div>` : `<div class="empty">${days[days.length - 1] < t ? 'This week is over.' : 'No visits left to confirm this week.'}</div>`}
+  </div>`;
 }
 
 /* ============ MONTH ============ */
@@ -617,7 +638,7 @@ async function planAdd(items) {
   render();
 }
 
-/* ============ CONFIRM (Monday) ============ */
+/* ============ previous meeting ============ */
 // The customer's most recent completed meeting before this appointment
 function lastMeeting(a) {
   const list = apptsFor(a.customerId);
@@ -638,29 +659,6 @@ function prevRecapDialog(a) {
     <div class="dlg-f"><button class="btn" id="pr-open">Open that appointment</button><span class="spacer"></span><button class="btn primary" data-close>Close</button></div>`,
     (el, close) => { el.querySelector('#pr-open').onclick = () => { close(); apptDialog(p); }; });
 }
-function viewConfirm() {
-  const t = today(), thisW = mondayOf(t);
-  const ws = S.confirmWeek || (dow(t) === 5 || dow(t) === 6 || dow(t) === 0 ? addDays(thisW, 7) : thisW);
-  S.confirmWeek = ws;
-  const days = Array.from({ length: 5 }, (_, i) => addDays(ws, i));
-  const all = days.flatMap(d => apptsOn(d).filter(a => a.kind === 'visit' || a.time).sort((a, b) => (a.time || '') < (b.time || '') ? -1 : 1));
-  const open = all.filter(isOpen), conf = open.filter(a => a.status === 'confirmed').length;
-  return `<div class="toolbar"><h2>Monday confirmations</h2><div class="seg"><button data-act="cw" data-d="-7" aria-label="Previous week">‹</button><button aria-pressed="true" disabled style="opacity:1">Week of ${niceShort(ws)}</button><button data-act="cw" data-d="7" aria-label="Following week">›</button></div><span class="spacer"></span><span class="pill ${conf === open.length && open.length ? 'ok' : 'warn'}">${conf} of ${open.length} confirmed</span></div>
-  <p class="lead">Reach out to each proposed visit, then tap Confirmed. If they need a different day, use Move and choose whether it's just this once or their new day.</p>
-  <div class="cols">${days.map(d => {
-    const items = all.filter(a => a.date === d);
-    if (!items.length) return '';
-    return `<div class="panel"><div class="row"><h3>${DAYS_LONG[dow(d)]} ${niceShort(d)}</h3><span class="spacer"></span><span class="muted small">${items.length} item${items.length === 1 ? '' : 's'}</span></div>${items.map(a => {
-      const c = S.customers.get(a.customerId) || {};
-      return `<div class="card"><div class="row"><b style="flex:1;min-width:0">${esc(apptName(a))}</b><span class="pill ${a.status === 'confirmed' ? 'ok' : a.status === 'proposed' ? 'warn' : a.status === 'completed' ? '' : 'bad'}">${a.status}</span></div>
-        <div class="meta"><span>${ICON[a.kind]} ${KINDS[a.kind]}${a.time ? ' · ' + t12(a.time) : ''}</span>${c.contact ? `<span>${esc(c.contact)}</span>` : ''}${c.phone ? `<span class="copyable">${esc(c.phone)}</span>` : ''}${c.email ? `<span class="copyable">${esc(c.email)}</span>` : ''}</div>
-        ${isOpen(a) ? taskList(actionItems(a)) : ''}
-        ${isOpen(a) ? `<div class="row"><button class="btn sm" data-act="copy-confirm" data-id="${a.id}">Copy message</button>${lastMeeting(a) ? `<button class="btn sm" data-act="prev-recap" data-id="${a.id}">Previous recap</button>` : ''}${a.status === 'proposed' ? `<button class="btn sm primary" data-act="confirm" data-id="${a.id}">Confirmed</button>` : `<button class="btn sm" data-act="unconfirm" data-id="${a.id}">Undo confirm</button>`}<button class="btn sm" data-act="open-appt" data-id="${a.id}">Move…</button><button class="btn sm danger" data-act="outcome" data-id="${a.id}" data-status="cancelled">Cancel</button></div>` : ''}
-      </div>`;
-    }).join('')}</div>`;
-  }).join('') || '<div class="panel"><div class="empty">Nothing is scheduled that week yet. Fill it from Recap and Plan.</div><button class="btn" data-act="goto" data-view="plan">Open Recap and Plan</button></div>'}</div>`;
-}
-
 /* ============ CUSTOMERS ============ */
 const CUST_PAGE = 150;
 function viewCustomers() {
@@ -731,7 +729,7 @@ function viewSettings() {
     </div>
     <div class="panel"><h3>Message templates</h3><p class="muted small" style="margin:0">Fill-ins: {first} {name} {kind} {day} {time} {notes} {next} {me}</p>
       <label class="fld"><span>Your name (for {me})</span><input id="s-sig" data-set="signature" value="${esc(s.signature)}"></label>
-      <label class="fld"><span>Monday confirmation</span><textarea id="s-ct" data-set="confirmTemplate" rows="3">${esc(s.confirmTemplate)}</textarea></label>
+      <label class="fld"><span>Confirmation message</span><textarea id="s-ct" data-set="confirmTemplate" rows="3">${esc(s.confirmTemplate)}</textarea></label>
       <label class="fld"><span>Friday recap</span><textarea id="s-rt" data-set="recapTemplate" rows="6">${esc(s.recapTemplate)}</textarea></label>
     </div>
   </div>`;
@@ -1258,7 +1256,6 @@ $('#main').addEventListener('click', async e => {
     case 'goto': S.view = t.dataset.view; render(); window.scrollTo(0, 0); break;
     case 'goto-week': S.anchor = t.dataset.date; S.view = 'week'; render(); window.scrollTo(0, 0); break;
     case 'pw': S.planWeek = addDays(S.planWeek, +t.dataset.d); render(); break;
-    case 'cw': S.confirmWeek = addDays(S.confirmWeek, +t.dataset.d); render(); break;
     case 'new-appt': apptDialog(null, { date: t.dataset.date }); break;
     case 'open-appt': if (a) apptDialog(a); break;
     case 'outcome': if (a) outcomeDialog(a, t.dataset.status); break;

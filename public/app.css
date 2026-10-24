@@ -92,7 +92,7 @@ main { max-width: 1400px; margin: 0 auto; padding-block: 14px 60px; }
 .ico { width: 14px; height: 14px; flex: none; vertical-align: -2px; }
 
 /* week grid */
-.week-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 18px; align-items: start; }
+.week-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
 .cal { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .cal-scroll { overflow-x: auto; }
 .cal-grid { display: grid; min-width: 640px; }
@@ -297,6 +297,9 @@ a.btn.primary { color: var(--accent-ink); }
 .colhead.plan { border-color: var(--accent); }
 .colhead.recap { border-color: var(--muted); }
 .li.start { align-items: flex-start; }
+.cday { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 10px 0 2px; }
+.cday + .li { border-top: 0; }
+.cf .tasks { margin: 6px 0 0; }
 .tasks { margin: 4px 0 0; padding: 0; list-style: none; font-size: .88rem; }
 .tasks li { margin: 2px 0; }
 .tasks label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
