@@ -384,3 +384,37 @@ a.btn.primary { color: var(--accent-ink); }
 [data-drag-cust].dragging { opacity: .5; }
 .grip { color: var(--muted); font-size: .8rem; letter-spacing: -2px; cursor: grab; user-select: none; }
 @media (hover: none) { .drag-hint, .grip { display: none; } }
+
+/* the hidden checkboxes inside day/product chips must not take up width (they pushed pages sideways on phones) */
+.daypick label { position: relative; }
+.daypick input { width: 1px; height: 1px; margin: 0; }
+
+/* ---- phones ---- */
+.brand h1 { white-space: nowrap; text-wrap: nowrap; }
+@media (max-width: 760px) {
+  /* header: logo + name, Viewing picker and account button on one row, tabs on the next */
+  .top-in { padding-block: 6px; row-gap: 4px; column-gap: 6px; }
+  .brand { flex: 1; min-width: 0; }
+  .brand { gap: 6px; }
+  .brand h1 { font-size: .95rem; overflow: hidden; text-overflow: ellipsis; }
+  .brand img { width: 24px; height: 24px; }
+  .sync { display: none; }                       /* the offline banner still shows when it matters */
+  .viewas { order: 0; max-width: 30vw; padding: 4px 4px; font-size: .8rem; }
+  .menu-btn { width: 32px; height: 32px; }
+  .tab { padding: 6px 9px; font-size: .9rem; }
+  .tab .day { display: none; }
+  main { padding-block: 10px 40px; }
+  h2 { font-size: 1.2rem; }
+  .toolbar { gap: 6px; margin-bottom: 10px; }
+  .lead { display: none; }
+  .hide-mobile { display: none; }
+  /* filters scroll sideways instead of running off the screen */
+  .toolbar .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .toolbar .seg button { white-space: nowrap; }
+  .toolbar .search { flex: 1; min-width: 0; }
+  /* customers: name and what's next; the rest is in the customer's record */
+  .ctable th:nth-child(n+2):nth-child(-n+5), .ctable td:nth-child(n+2):nth-child(-n+5) { display: none; }
+  .ctable td:first-child { white-space: normal; }
+  /* month: no room for holiday names in the small squares */
+  .mc .n .pill { display: none; }
+}
