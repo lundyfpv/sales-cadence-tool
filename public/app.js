@@ -511,25 +511,26 @@ function weekSide(ws, days) {
       <div class="list">${stale.slice(0, 8).map(a => `<div class="li"><div class="grow"><div class="nm">${esc(apptName(a))}</div><div class="muted small">${KINDS[a.kind]} · ${nice(a.date)}</div></div><button class="btn sm" data-act="outcome" data-id="${a.id}">Log</button></div>`).join('')}</div></div>` : ''}
   </aside>`;
 }
-// Confirming the shown week's visits (Monday's job): contact details, the message to copy, and Confirmed / Move / Cancel
+// Confirming the shown week's visits (Monday's job): what's left to confirm on top, confirmed ones below in one line each
 function confirmPanel(days) {
   const t = today();
   const items = days.filter(d => d >= t).flatMap(d => apptsOn(d).filter(a => isOpen(a) && (a.kind === 'visit' || a.time)).sort((a, b) => (a.time || '') < (b.time || '') ? -1 : 1));
-  const conf = items.filter(a => a.status === 'confirmed').length;
-  let lastDay = '';
-  return `<div class="panel"><div class="row"><h3>Confirm visits</h3><span class="spacer"></span>${items.length ? `<span class="pill ${conf === items.length ? 'ok' : 'warn'}">${conf} of ${items.length}</span>` : ''}</div>
-    ${items.length ? `<div class="list">${items.map(a => {
-      const c = S.customers.get(a.customerId) || {}, head = a.date !== lastDay ? `<div class="cday">${DAYS_LONG[dow(a.date)]} ${niceShort(a.date)}</div>` : '';
-      lastDay = a.date;
-      if (a.status === 'confirmed') return head + `<div class="li"><span class="pill ok" title="Confirmed">${ICON.check}</span><div class="grow"><button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button><div class="muted small">${a.time ? t12(a.time) : 'Any time'}${c.contact ? ' · ' + esc(c.contact) : ''}</div></div><button class="btn sm ghost" data-act="unconfirm" data-id="${a.id}">Undo</button></div>`;
-      return head + `<div class="li start cf"><div class="grow">
+  const todo = items.filter(a => a.status === 'proposed'), done = items.filter(a => a.status === 'confirmed');
+  const when = a => `<div class="cf-when"><b>${DAYS[dow(a.date)]} ${toD(a.date).getDate()}</b>${a.time ? t12s(a.time) : 'Any time'}</div>`;
+  const contact = c => [c.contact && esc(c.contact), c.phone && `<span class="copyable">${esc(c.phone)}</span>`, c.email && `<span class="copyable">${esc(c.email)}</span>`].filter(Boolean).map(v => `<div class="muted small cf-line">${v}</div>`).join('');
+  const row = a => {
+    const c = S.customers.get(a.customerId) || {};
+    return `<div class="cf-row">${when(a)}<div class="grow">
         <button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button>
-        <div class="muted small">${ICON[a.kind]} ${a.time ? t12(a.time) : 'Any time'}${c.contact ? ' · ' + esc(c.contact) : ''}</div>
-        ${c.phone || c.email ? `<div class="muted small">${[c.phone, c.email].filter(Boolean).map(v => `<span class="copyable">${esc(v)}</span>`).join(' · ')}</div>` : ''}
+        ${contact(c)}
         ${taskList(actionItems(a))}
-        <div class="row" style="gap:6px;margin-top:6px"><button class="btn sm primary" data-act="confirm" data-id="${a.id}">Confirmed</button><button class="btn sm" data-act="copy-confirm" data-id="${a.id}">Copy message</button>${lastMeeting(a) ? `<button class="btn sm" data-act="prev-recap" data-id="${a.id}">Previous recap</button>` : ''}<button class="btn sm" data-act="open-appt" data-id="${a.id}">Move…</button><button class="btn sm danger" data-act="outcome" data-id="${a.id}" data-status="cancelled">Cancel</button></div>
+        <div class="cf-acts"><button class="btn sm primary" data-act="confirm" data-id="${a.id}">Confirm</button><button class="linkbtn" data-act="copy-confirm" data-id="${a.id}">Copy message</button>${lastMeeting(a) ? `<button class="linkbtn" data-act="prev-recap" data-id="${a.id}">Last recap</button>` : ''}<button class="linkbtn" data-act="open-appt" data-id="${a.id}">Move</button><button class="linkbtn bad" data-act="outcome" data-id="${a.id}" data-status="cancelled">Cancel</button></div>
       </div></div>`;
-    }).join('')}</div>` : `<div class="empty">${days[days.length - 1] < t ? 'This week is over.' : 'No visits left to confirm this week.'}</div>`}
+  };
+  const doneRow = a => `<div class="cf-row done">${when(a)}<div class="grow"><span class="cf-check" aria-hidden="true">${ICON.check}</span><button class="linkbtn nm" data-act="open-appt" data-id="${a.id}">${esc(apptName(a))}</button></div><button class="linkbtn undo" data-act="unconfirm" data-id="${a.id}">Undo</button></div>`;
+  return `<div class="panel"><div class="row"><h3>Confirm visits</h3><span class="spacer"></span>${items.length ? `<span class="pill ${todo.length ? 'warn' : 'ok'}">${todo.length ? todo.length + ' to confirm' : 'All confirmed'}</span>` : ''}</div>
+    ${items.length ? `${todo.map(row).join('')}${done.length ? `<div class="cf-sub">Confirmed · ${done.length}</div>${done.map(doneRow).join('')}` : ''}`
+      : `<div class="empty">${days[days.length - 1] < t ? 'This week is over.' : 'No visits left to confirm this week.'}</div>`}
   </div>`;
 }
 

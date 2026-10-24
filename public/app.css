@@ -297,9 +297,24 @@ a.btn.primary { color: var(--accent-ink); }
 .colhead.plan { border-color: var(--accent); }
 .colhead.recap { border-color: var(--muted); }
 .li.start { align-items: flex-start; }
-.cday { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 10px 0 2px; }
-.cday + .li { border-top: 0; }
-.cf .tasks { margin: 6px 0 0; }
+.cf-row { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
+.panel > .row + .cf-row, .cf-sub + .cf-row { border-top: 0; }
+.cf-row .nm { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cf-when { font-size: .75rem; color: var(--muted); line-height: 1.3; padding-top: 2px; }
+.cf-when b { display: block; color: var(--ink); font-size: .8rem; white-space: nowrap; }
+.cf-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 8px; }
+.cf-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cf-row .tasks { margin-top: 6px; }
+.cf-acts .linkbtn { font-size: .8rem; font-weight: 500; color: var(--muted); }
+.cf-acts .linkbtn:hover { color: var(--ink); }
+.cf-acts .linkbtn.bad { color: var(--red); }
+.cf-row.done { grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; padding: 6px 0; }
+.cf-row .undo { font-size: .8rem; font-weight: 500; color: var(--muted); }
+.cf-row.done .grow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cf-row.done .nm { font-weight: 500; color: var(--muted); }
+.cf-check { color: var(--accent); display: inline-flex; flex: none; }
+.cf-sub { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 14px 0 4px; border-top: 1px solid var(--line); margin-top: 4px; }
+.panel > .row + .cf-sub { border-top: 0; margin-top: 0; padding-top: 6px; }
 .tasks { margin: 4px 0 0; padding: 0; list-style: none; font-size: .88rem; }
 .tasks li { margin: 2px 0; }
 .tasks label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
