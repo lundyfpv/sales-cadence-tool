@@ -1266,6 +1266,7 @@ function applyView() {
   S.appts = new Map(S.raw.appointments.filter(mine).map(a => [a.id, a]));
 }
 function drawViewAs() {
+  if (S.user.photo) $('#menu-btn').innerHTML = `<img class="avatar" src="/api/users/${S.user.id}/photo?v=${S.user.photo}" alt="">`;
   $('#menu-admin').textContent = S.user.admin ? 'Admin: people, HTTPS, backups' : 'Account & team';
   const sel = $('#viewas'), others = S.users.filter(u => u.id !== S.user.id);
   sel.hidden = !others.length; if (!others.length) return;

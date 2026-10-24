@@ -27,7 +27,7 @@ Alec, a field sales rep, set it up and is its admin (his account is TSM + Admin)
 - `public/admin.*`, `public/login.*`: the admin and login pages. `theme.js` applies light/dark mode and the accent color before first paint.
 
 ## Accounts
-- `users` rows: role (admin|director|rsm|tsm, ranked in that order), is_admin (admin permission on top of any role), manager_id (reports to; must outrank them), name, active.
+- `users` rows: role (admin|director|rsm|tsm, ranked in that order), is_admin (admin permission on top of any role), manager_id (reports to; must outrank them), name, active, photo (time it was last set; the image is `uploads/avatar-<id>`, cropped to 256px in the browser, served at `/api/users/<id>/photo`).
 - Each person sees their own records plus everyone below them in the chain; an admin sees everyone (`auth.visibleOwners`). Every docs/batch/files request is checked against that list in `writeDoc` / `apptVisible` (server/index.js). Never return or write a record without that check.
 - Managing people (`/api/users`): an admin manages anyone but themselves; others manage people below them in their chain who have a lower role and are not admins (`auth.canManage`, `roleProblem`). Only admins grant Admin, and at least one active admin must remain.
 - The client loads everything it may see (`S.raw`) and narrows it with the **Viewing** picker (`applyView`). Writes made while viewing someone send `?owner=` so new customers belong to them.
