@@ -418,3 +418,25 @@ a.btn.primary { color: var(--accent-ink); }
   /* month: no room for holiday names in the small squares */
   .mc .n .pill { display: none; }
 }
+
+/* notifications: bell, unread count and tray */
+.bell { position: relative; }
+.bell .badge { position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: var(--red); color: #fff; font-size: .68rem; font-weight: 800; display: grid; place-items: center; line-height: 1; border: 2px solid var(--surface); }
+.tray { width: min(380px, calc(100vw - 24px)); max-height: min(520px, 75vh); overflow-y: auto; padding: 4px; }
+.tray-h { display: flex; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); position: sticky; top: -4px; background: var(--surface); }
+.tray .note { display: flex; gap: 10px; align-items: flex-start; text-align: left; width: 100%; padding: 10px; border-radius: 8px; }
+.tray .note .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.tray .note.unread { background: var(--accent-soft); }
+.tray .note .snip { font-size: .86rem; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+.mention { color: var(--accent); font-weight: 650; background: var(--accent-soft); border-radius: 4px; padding: 0 3px; }
+.mention-pop { position: fixed; z-index: 200; width: 260px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; display: flex; flex-direction: column; }
+.mention-pop button { display: flex; gap: 8px; align-items: center; text-align: left; border: 0; background: none; padding: 6px 8px; border-radius: 6px; cursor: pointer; color: var(--ink); }
+.mention-pop button[aria-selected="true"], .mention-pop button:hover { background: var(--surface-2); }
+.mention-pop .avatar { width: 26px; height: 26px; font-size: .7rem; }
+@media (max-width: 760px) {
+  /* the tray becomes a full-width panel under the header */
+  .tray { position: fixed; left: 10px; right: 10px; top: 52px; width: auto; max-height: 70vh; }
+  .brand h1 { font-size: .9rem; }
+  .viewas { max-width: 19vw; }
+  .menu-btn { width: 30px; height: 30px; }
+}

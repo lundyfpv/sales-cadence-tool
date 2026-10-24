@@ -42,6 +42,15 @@ addColumn('users', 'is_admin', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('users', 'photo', 'INTEGER'); // when the profile photo was last set (also busts caches); null = none
 addColumn('docs', 'owner', 'TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS docs_owner ON docs(owner)');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, from_id TEXT, appt_id TEXT, field TEXT, text TEXT,
+    customer TEXT, date TEXT, created INTEGER NOT NULL, read INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id, created);
+  -- who has already been told about a mention, so re-saving the same text doesn't notify again
+  CREATE TABLE IF NOT EXISTS mentions_sent (appt_id TEXT NOT NULL, field TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (appt_id, field, user_id));
+`);
 
 const COLLECTIONS = new Set(['customers', 'appointments', 'config']);
 // Customers and appointments belong to a user (docs.owner). Settings are split: these keys are one

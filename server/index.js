@@ -70,8 +70,38 @@ function writeDoc(user, owners, op, coll, id, data, owner) {
     if (cur === undefined && co !== undefined) owner = co;
   }
   if (op === 'delete') { if (cur !== undefined) store.deleteDoc(coll, id); return; }
-  if (op === 'update') { if (cur === undefined || !store.patchDoc(coll, id, data)) throw Object.assign(new Error('That record no longer exists.'), { status: 404 }); return; }
-  store.putDoc(coll, id, data, cur !== undefined ? cur : (owner && owners.includes(owner) ? owner : user.id));
+  if (op === 'update') { if (cur === undefined || !store.patchDoc(coll, id, data)) throw Object.assign(new Error('That record no longer exists.'), { status: 404 }); }
+  else store.putDoc(coll, id, data, cur !== undefined ? cur : (owner && owners.includes(owner) ? owner : user.id));
+  if (coll === 'appointments' && data && Object.keys(MENTION_FIELDS).some(f => f in data)) notifyMentions(user, id);
+}
+/* ---------- @mentions ---------- */
+// "@username" in an appointment's agenda, recap or action items notifies that person once per field.
+const MENTION_FIELDS = { notes: 'agenda', recap: 'recap', actions: 'action items' };
+const nq = {
+  sent: store.db.prepare('SELECT 1 FROM mentions_sent WHERE appt_id = ? AND field = ? AND user_id = ?'),
+  markSent: store.db.prepare('INSERT OR IGNORE INTO mentions_sent (appt_id, field, user_id) VALUES (?, ?, ?)'),
+  add: store.db.prepare('INSERT INTO notifications (id, user_id, from_id, appt_id, field, text, customer, date, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  forUser: store.db.prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY created DESC LIMIT 50'),
+  read: store.db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ? AND id = ?'),
+  readAll: store.db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?'),
+};
+const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// a username can contain . _ @ -, so match each known username rather than guessing where a mention ends
+const mentioned = (text, u) => new RegExp('(^|[^A-Za-z0-9_.@-])@' + reEsc(u.username) + '(?![A-Za-z0-9_@-]|\\.[A-Za-z0-9])', 'i').test(text);
+function notifyMentions(author, apptId) {
+  const a = store.getDoc('appointments', apptId); if (!a) return;
+  const cust = a.customerId ? store.getDoc('customers', a.customerId) : null;
+  const people = auth.allUsers().filter(u => u.active && u.id !== author.id);
+  for (const [field, label] of Object.entries(MENTION_FIELDS)) {
+    const text = String(a[field] || ''); if (!text.includes('@')) continue;
+    for (const u of people) {
+      if (!mentioned(text, u) || nq.sent.get(apptId, field, u.id)) continue;
+      nq.markSent.run(apptId, field, u.id);
+      // keep the lines that mention them (or the start of the text) so the note reads on its own
+      const lines = text.split('\n').filter(l => mentioned(l, u));
+      nq.add.run(crypto.randomUUID(), u.id, author.id, apptId, label, (lines.length ? lines.join('\n') : text).slice(0, 600), cust ? (cust.name || cust.contact || '') : (a.name || ''), a.date || '', Date.now());
+    }
+  }
 }
 const apptVisible = (owners, apptId) => { const o = store.docOwner('appointments', apptId); return o !== undefined && owners.includes(o); };
 
@@ -206,7 +236,10 @@ async function handle(req, res) {
 
     if (p === '/api/state' && req.method === 'GET') {
       return send(res, 200, { ...store.state(owners, user.id), user, canEditCompany: canEditCompany(user), roles: auth.ROLES,
-        users: users.filter(u => owners.includes(u.id)).map(auth.publicUser) });
+        users: users.filter(u => owners.includes(u.id)).map(auth.publicUser),
+        // everyone who can be @mentioned, and this person's notifications
+        directory: users.filter(u => u.active).map(u => ({ id: u.id, username: u.username, name: u.name || '', role: u.role, photo: u.photo || null })),
+        notifications: nq.forUser.all(user.id).map(n => ({ id: n.id, from: n.from_id, appt: n.appt_id, field: n.field, text: n.text, customer: n.customer, date: n.date, created: n.created, read: !!n.read })) });
     }
 
     if (p === '/api/events' && req.method === 'GET') {
@@ -380,6 +413,12 @@ async function handle(req, res) {
       });
       store.bump();
       return send(res, 200, { ok: true, customers: b.customers.length, appointments: b.appointments.length });
+    }
+
+    if (p === '/api/notifications/read' && req.method === 'POST') {
+      const b = await readJson(req);
+      if (b.all) nq.readAll.run(user.id); else for (const id of (Array.isArray(b.ids) ? b.ids : []).slice(0, 200)) nq.read.run(user.id, String(id));
+      store.bump(); return send(res, 200, { ok: true });
     }
 
     /* ---- people: accounts, roles and who reports to whom ---- */

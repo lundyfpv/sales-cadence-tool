@@ -32,6 +32,11 @@ Alec, a field sales rep, set it up and is its admin (his account is TSM + Admin)
 - Managing people (`/api/users`): an admin manages anyone but themselves; others manage people below them in their chain who have a lower role and are not admins (`auth.canManage`, `roleProblem`). Only admins grant Admin, and at least one active admin must remain.
 - The client loads everything it may see (`S.raw`) and narrows it with the **Viewing** picker (`applyView`). Writes made while viewing someone send `?owner=` so new customers belong to them.
 
+## Mentions and notifications
+- `@username` in an appointment's notes, recap or actions notifies that user once per appointment and field (`notifyMentions` in server/index.js; `mentions_sent` remembers who was told). Tables: `notifications` (per recipient, with a text excerpt, customer and date, so the note reads even without access to the appointment) and `mentions_sent`.
+- `/api/state` includes `directory` (every active user: id, username, name, role, photo; used for @ autocomplete) and the user's last 50 `notifications`. `POST /api/notifications/read` takes `{ids}` or `{all: true}`.
+- Usernames can contain `.`, `_`, `@` and `-`, so mentions are matched per known username (`mentioned` / `mentionRe`), not with a generic pattern. `fill()` strips mentions so customer emails never include them.
+
 ## Data model
 - `docs.owner` is the user id each customer and appointment belongs to. New appointments take their customer's owner.
 - **customers**: name, custId (the customer's own ID, free text), prospect (bool), prospectSince (date it became a prospect), assigned (bool, assigned account), products (array of category names they currently buy), competitors (array of competitor equipment brands; older records may still have a single `competitor` string, read as a one-item list), distributors (array of current distributors), contact, phone, email, address, kind (visit|call|email|text), cadence, unit (weeks|days), homeDay (0–6 or ''), preferredTime, duration, active, notes, lastTouch, rhythmDate.
