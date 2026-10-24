@@ -10,6 +10,8 @@ function today() { return fmt(new Date()); }
 function mondayOf(s) { const w = dow(s); return addDays(s, w === 0 ? -6 : 1 - w); }
 // calendar weeks start on Sunday unless the user picks Monday; planning weeks stay Monday-based
 function weekStartOf(s) { const st = +S.settings.weekStart === 1 ? 1 : 0; return addDays(s, -((dow(s) - st + 7) % 7)); }
+// the week the Week view shows for a date: with weekends hidden, Sunday already belongs to the coming week (matters for Monday starts)
+function shownWeekOf(s) { return weekStartOf(dow(s) === 0 && !S.settings.showWeekend ? addDays(s, 1) : s); }
 function diffDays(a, b) { return Math.round((toD(b) - toD(a)) / 86400000); }
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -416,8 +418,8 @@ function chip(a, extra = '') {
 function weekDays(start) { if (!S.settings.showWeekend) start = mondayOf(addDays(start, 1)); const n = S.settings.showWeekend ? 7 : 5; return Array.from({ length: n }, (_, i) => addDays(start, i)); }
 function apptsOn(date) { return apptsDated(date).filter(a => a.status !== 'cancelled'); }
 function viewWeek() {
-  const ws = weekStartOf(S.anchor), days = weekDays(ws), t = today();
-  const thisW = weekStartOf(t), nextW = addDays(thisW, 7);
+  const ws = shownWeekOf(S.anchor), days = weekDays(ws), t = today();
+  const thisW = shownWeekOf(t), nextW = addDays(thisW, 7);
   const label = `${toD(days[0]).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${toD(days[days.length - 1]).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
   const tb = `<div class="toolbar">
     <h2 class="wtitle">${ws === thisW ? 'This week' : ws === nextW ? 'Next week' : 'Week of ' + niceShort(ws)}</h2>
@@ -1064,7 +1066,7 @@ function offerFile(filename, text, type = 'text/csv') {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }
 function exportWeek() {
-  const ws = weekStartOf(S.anchor), we = addDays(ws, 6);
+  const ws = shownWeekOf(S.anchor), we = addDays(ws, 6);
   const rows = [...S.appts.values()].filter(a => a.date >= ws && a.date <= we && isOpen(a)).sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
   if (!rows.length) { toast('Nothing open to export that week.'); return; }
   const head = ['Subject', 'Start Date', 'Start Time', 'End Date', 'End Time', 'All Day Event', 'Description', 'Location'];
@@ -1247,9 +1249,9 @@ $('#main').addEventListener('click', async e => {
   const act = t.dataset.act, id = t.dataset.id;
   const a = id ? S.appts.get(id) : null;
   switch (act) {
-    case 'wk': S.anchor = addDays(weekStartOf(S.anchor), +t.dataset.d); render(); break;
+    case 'wk': S.anchor = addDays(shownWeekOf(S.anchor), +t.dataset.d); render(); break;
     case 'wk-this': S.anchor = today(); render(); break;
-    case 'wk-next': S.anchor = addDays(weekStartOf(today()), 7); render(); break;
+    case 'wk-next': S.anchor = addDays(shownWeekOf(today()), 7); render(); break;
     case 'mo': { const d = toD(S.monthAnchor); S.monthAnchor = fmt(new Date(d.getFullYear(), d.getMonth() + +t.dataset.d, 1, 12)); render(); break; }
     case 'mo-today': S.monthAnchor = today(); render(); break;
     case 'mo-day': S.anchor = t.dataset.date; S.view = 'week'; render(); break;
