@@ -420,7 +420,9 @@ function apptsOn(date) { return apptsDated(date).filter(a => a.status !== 'cance
 function viewWeek() {
   const ws = shownWeekOf(S.anchor), days = weekDays(ws), t = today();
   const thisW = shownWeekOf(t), nextW = addDays(thisW, 7);
-  const label = `${toD(days[0]).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${toD(days[days.length - 1]).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  // the label always spans the full 7-day week from the user's week start, even when weekends are hidden
+  const wk0 = weekStartOf(days[0]);
+  const label = `${toD(wk0).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${toD(addDays(wk0, 6)).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
   const tb = `<div class="toolbar">
     <h2 class="wtitle">${ws === thisW ? 'This week' : ws === nextW ? 'Next week' : 'Week of ' + niceShort(ws)}</h2>
     <div class="seg"><button data-act="wk" data-d="-7" aria-label="Previous week">‹</button><button data-act="wk-this" aria-pressed="${ws === thisW}">This week</button><button data-act="wk-next" aria-pressed="${ws === nextW}">Next week</button><button data-act="wk" data-d="7" aria-label="Following week">›</button></div>
