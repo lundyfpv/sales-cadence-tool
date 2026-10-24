@@ -129,9 +129,16 @@
     $('u-list').innerHTML = P.users.slice().sort((a, b) => RANK[b.role] - RANK[a.role] || nm(a).localeCompare(nm(b))).map(u => `<div class="li" style="flex-wrap:wrap">
       ${avatar(u)}<div class="grow"><b>${esc(nm(u))}</b>${u.id === P.me ? ' <span class="pill">you</span>' : ''}${u.active ? '' : ' <span class="pill bad">Turned off</span>'}
         <div class="muted small">${esc(roleText(u))} · @${esc(u.username)}${u.manager ? ' · reports to ' + esc(nm(byId(u.manager)) || 'someone outside your team') : ''}${u.totp ? ' · two-step on' : ''}</div></div>
-${u.canManage ? `<button class="btn sm" data-edit="${u.id}">Edit</button><button class="btn sm" data-pw="${u.id}">Reset password</button><button class="btn sm ${u.active ? 'danger' : ''}" data-act="${u.id}" data-on="${u.active ? 0 : 1}">${u.active ? 'Turn off' : 'Turn on'}</button>` : ''}
+${u.id === P.me && me.admin ? '<button class="btn sm" id="u-mymgr">Reports to…</button>' : ''}${u.canManage ? `<button class="btn sm" data-edit="${u.id}">Edit</button><button class="btn sm" data-pw="${u.id}">Reset password</button><button class="btn sm ${u.active ? 'danger' : ''}" data-act="${u.id}" data-on="${u.active ? 0 : 1}">${u.active ? 'Turn off' : 'Turn on'}</button>` : ''}
     </div>`).join('');
     $('u-list').querySelectorAll('[data-edit]').forEach(b => b.onclick = () => form(P.users.find(u => u.id === b.dataset.edit)));
+    const mm = $('u-mymgr'); if (mm) mm.onclick = () => {
+      const box = $('u-form'); box.hidden = false;
+      const opts = P.managers.filter(x => x.id !== me.id && RANK[x.role] > RANK[me.role]);
+      box.innerHTML = `<div class="note"><b>Who you report to</b><p class="muted small" style="margin:4px 0 8px">Your manager and everyone above them can see your customers and calendar.</p><div class="row"><select class="inp" id="u-mym" style="max-width:300px"><option value="">Nobody</option>${opts.map(x => `<option value="${x.id}" ${x.id === me.manager ? 'selected' : ''}>${esc(nm(x))} · ${esc(P.roles[x.role])}</option>`).join('')}</select><button class="btn primary" id="u-mymgo">Save</button><button class="btn" id="u-cancel">Cancel</button><span class="muted small" id="u-msg"></span></div></div>`;
+      $('u-cancel').onclick = () => { box.hidden = true; };
+      $('u-mymgo').onclick = async () => { try { await api('PATCH', '/api/users/' + me.id, { manager: $('u-mym').value || null }); box.hidden = true; toast('Saved.'); loadPeople(); } catch (e) { $('u-msg').textContent = e.message; } };
+    };
     $('u-list').querySelectorAll('[data-pw]').forEach(b => b.onclick = () => resetPw(P.users.find(u => u.id === b.dataset.pw)));
     $('u-list').querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
       try { await api('PATCH', '/api/users/' + b.dataset.act, { active: b.dataset.on === '1' }); toast(b.dataset.on === '1' ? 'Turned on.' : 'Turned off. They\'re signed out everywhere.'); loadPeople(); } catch (e) { toast(e.message); }

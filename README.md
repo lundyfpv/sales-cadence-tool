@@ -13,7 +13,7 @@ A self-hosted planner for keeping customers on a regular visit/call cadence.
 - **Monday confirm.** This week's appointments with contact details, a copyable confirmation message, and a Confirmed button.
 - **US federal holidays** appear on the calendar automatically. New Year's, Memorial Day, July 4th, Labor Day, Thanksgiving and the day after, and Christmas are blocked like time off; the rest are labeled only. Add your own time off under Settings → Holidays & time off.
 - **Team accounts.** Global admin → Sales director → Regional sales manager → Territory sales manager, with an optional Admin permission on any role. See "Accounts and roles" below.
-- **@mentions and notifications.** Type @ in an agenda, recap or action items box to tag anyone in the company. They get a notification in the bell tray at the top, which opens the appointment if it's on their team's calendar or shows the tagged text if it isn't. Each person is notified once per mention, and tags are removed from emails to customers.
+- **@mentions and notifications.** Type @ in an agenda, recap or action items box to tag anyone in the company. They get a notification in the bell tray at the top, which opens the appointment if it's on their team's calendar. If it isn't, tagging shares that one appointment with them read-only (agenda, recap and action items). Each person is notified once per mention, and tags are removed from emails to customers.
 - **Recaps & files** on every appointment (photos, quotes, order forms).
 - **Import and export.** Customers import from Excel (.xlsx) or CSV, or from rows pasted from a spreadsheet, and export to CSV. A week exports as a calendar CSV.
 - **Login.** Password with optional authenticator-app codes; sessions last 30 days.

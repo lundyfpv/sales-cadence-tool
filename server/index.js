@@ -84,6 +84,7 @@ const nq = {
   forUser: store.db.prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY created DESC LIMIT 50'),
   read: store.db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ? AND id = ?'),
   readAll: store.db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?'),
+  wasTagged: store.db.prepare('SELECT 1 FROM notifications WHERE user_id = ? AND appt_id = ? LIMIT 1'),
 };
 const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // a username can contain . _ @ -, so match each known username rather than guessing where a mention ends
@@ -415,6 +416,17 @@ async function handle(req, res) {
       return send(res, 200, { ok: true, customers: b.customers.length, appointments: b.appointments.length });
     }
 
+    // Being @mentioned shares that one appointment with you, read-only, even outside your chain
+    m = p.match(/^\/api\/mention\/([^/]+)$/);
+    if (m && req.method === 'GET') {
+      if (!idOk(m[1]) || !nq.wasTagged.get(user.id, m[1])) throw forbidden();
+      const a = store.getDoc('appointments', m[1]); if (!a) return fail(res, 404, 'That appointment was deleted.');
+      const c = a.customerId ? store.getDoc('customers', a.customerId) : null, o = users.find(u => u.id === store.docOwner('appointments', m[1]));
+      return send(res, 200, {
+        appt: { date: a.date, time: a.time, kind: a.kind, status: a.status, notes: a.notes || '', recap: a.recap || '', actions: a.actions || '', actionsDone: a.actionsDone || [] },
+        customer: c ? { name: c.name || '', contact: c.contact || '', address: c.address || '' } : { name: a.name || '' },
+        owner: o ? (o.name || o.username) : '' });
+    }
     if (p === '/api/notifications/read' && req.method === 'POST') {
       const b = await readJson(req);
       if (b.all) nq.readAll.run(user.id); else for (const id of (Array.isArray(b.ids) ? b.ids : []).slice(0, 200)) nq.read.run(user.id, String(id));
@@ -475,9 +487,11 @@ async function handle(req, res) {
     if (m) {
       const target = users.find(u => u.id === m[1]);
       const b = await readJson(req);
-      // anyone can change their own display name
-      if (target && target.id === user.id && !m[2] && req.method === 'PATCH' && Object.keys(b).every(k => k === 'name')) {
-        auth.q.update.run(String(b.name || '').trim().slice(0, 80) || null, target.role, target.manager_id, target.active, target.is_admin, target.id);
+      // anyone can change their own display name; an admin can also set who they report to
+      if (target && target.id === user.id && !m[2] && req.method === 'PATCH' && Object.keys(b).every(k => k === 'name' || (k === 'manager' && auth.isAdmin(user)))) {
+        const manager = b.manager !== undefined ? (b.manager || null) : target.manager_id;
+        if (b.manager !== undefined) { const why = roleProblem(user, users, target, target.role, manager); if (why) return fail(res, 400, why); }
+        auth.q.update.run(b.name !== undefined ? String(b.name || '').trim().slice(0, 80) || null : target.name, target.role, manager, target.active, target.is_admin, target.id);
         store.bump(); return send(res, 200, { ok: true });
       }
       if (!auth.canManage(user, target, users)) throw forbidden();

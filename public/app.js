@@ -1384,11 +1384,22 @@ async function openNote(n) {
     if (!S.appts.has(a.id)) { S.viewAs = a.owner === S.user.id ? 'me' : S.users.some(u => u.id === a.owner) ? a.owner : 'team'; try { localStorage.setItem('cb.viewAs', S.viewAs); } catch (e) {} applyView(); drawViewAs(); render(); }
     return apptDialog(S.appts.get(a.id));
   }
-  // not theirs to open (outside their team, or deleted): show what was written
+  // outside their team: the tag shares the whole appointment with them, read-only
   const f = dirUser(n.from);
-  openDialog(`<div class="dlg-h"><h2>${esc(f ? f.name || f.username : 'Someone')} mentioned you</h2><button class="x" data-close aria-label="Close">×</button></div>
-    <div class="dlg-b"><div class="muted small">In ${esc(n.field)}${n.customer ? ' · ' + esc(n.customer) : ''}${n.date ? ' · ' + nice(n.date) : ''} · ${ago(n.created)}</div><div style="white-space:pre-wrap">${withMentions(n.text)}</div>
-    <p class="muted small" style="margin:0">That appointment isn't on your team's calendar, so this is the part that mentions you.</p></div>
+  let d = null; try { d = await api('GET', '/api/mention/' + encodeURIComponent(n.appt)); } catch (e) {}
+  const sect = (label, body) => body ? `<div><div class="label" style="margin-bottom:4px">${label}</div>${body}</div>` : '';
+  const bullets = t => lines(t).length ? `<ul class="recap-list">${lines(t).map(l => `<li>${withMentions(l)}</li>`).join('')}</ul>` : '';
+  const ap = d?.appt;
+  openDialog(`<div class="dlg-h"><h2>${esc(d?.customer?.name || n.customer || 'Appointment')}</h2><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="dlg-b">
+      <div class="muted small">${esc(f ? f.name || f.username : 'Someone')} mentioned you in ${esc(n.field)} · ${ago(n.created)}</div>
+      ${ap ? `<div class="muted small">${KINDS[ap.kind] || 'Visit'} on ${nice(ap.date)}${ap.time ? ' · ' + t12(ap.time) : ''} · ${esc(ap.status)}${d.owner ? ' · ' + esc(d.owner) + '\'s calendar' : ''}${d.customer.contact ? ' · ' + esc(d.customer.contact) : ''}${d.customer.address ? ' · ' + esc(d.customer.address) : ''}</div>
+        ${sect('Agenda / prep notes', ap.notes ? `<div style="white-space:pre-wrap">${withMentions(ap.notes)}</div>` : '')}
+        ${sect('Recap', bullets(ap.recap))}
+        ${sect('Action items', taskList(lines(ap.actions).map(t => ({ t, from: {}, done: ap.actionsDone.includes(t) })), false))}`
+      : `<div style="white-space:pre-wrap">${withMentions(n.text)}</div><p class="muted small" style="margin:0">That appointment has since been deleted.</p>`}
+      ${ap ? '<p class="muted small" style="margin:0">Shared with you because you were tagged. It\'s read-only because it\'s on someone else\'s calendar.</p>' : ''}
+    </div>
     <div class="dlg-f"><span class="spacer"></span><button class="btn primary" data-close>Close</button></div>`, () => {});
 }
 $('#bell').onclick = e => { e.stopPropagation(); const t = $('#tray'); t.hidden = !t.hidden; $('#bell').setAttribute('aria-expanded', !t.hidden); if (!t.hidden) { $('#menu-pop').hidden = true; drawTray(); } };

@@ -29,11 +29,12 @@ Alec, a field sales rep, set it up and is its admin (his account is TSM + Admin)
 ## Accounts
 - `users` rows: role (admin|director|rsm|tsm, ranked in that order), is_admin (admin permission on top of any role), manager_id (reports to; must outrank them), name, active, photo (time it was last set; the image is `uploads/avatar-<id>`, cropped to 256px in the browser, served at `/api/users/<id>/photo`).
 - Each person sees their own records plus everyone below them in the chain; an admin sees everyone (`auth.visibleOwners`). Every docs/batch/files request is checked against that list in `writeDoc` / `apptVisible` (server/index.js). Never return or write a record without that check.
-- Managing people (`/api/users`): an admin manages anyone but themselves; others manage people below them in their chain who have a lower role and are not admins (`auth.canManage`, `roleProblem`). Only admins grant Admin, and at least one active admin must remain.
+- Managing people (`/api/users`): an admin manages anyone but themselves; others manage people below them in their chain who have a lower role and are not admins (`auth.canManage`, `roleProblem`). Only admins grant Admin, and at least one active admin must remain. Anyone can change their own name; an admin can also set their own manager (Admin → People → Reports to…).
 - The client loads everything it may see (`S.raw`) and narrows it with the **Viewing** picker (`applyView`). Writes made while viewing someone send `?owner=` so new customers belong to them.
 
 ## Mentions and notifications
 - `@username` in an appointment's notes, recap or actions notifies that user once per appointment and field (`notifyMentions` in server/index.js; `mentions_sent` remembers who was told). Tables: `notifications` (per recipient, with a text excerpt, customer and date, so the note reads even without access to the appointment) and `mentions_sent`.
+- Being tagged shares that appointment read-only: `GET /api/mention/<apptId>` returns its agenda, recap and action items only if the user has a notification for it. The tray opens the real appointment when it's in the user's chain, and this read-only view otherwise.
 - `/api/state` includes `directory` (every active user: id, username, name, role, photo; used for @ autocomplete) and the user's last 50 `notifications`. `POST /api/notifications/read` takes `{ids}` or `{all: true}`.
 - Usernames can contain `.`, `_`, `@` and `-`, so mentions are matched per known username (`mentioned` / `mentionRe`), not with a generic pattern. `fill()` strips mentions so customer emails never include them.
 
