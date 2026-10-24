@@ -1,11 +1,7 @@
 (async function () {
   const $ = id => document.getElementById(id);
   let setup = false;
-  try {
-    const s = await (await fetch('/api/session')).json(); if (s.user) location.href = '/'; setup = s.setupNeeded;
-    // the company's sign-in logo, when an admin has uploaded one
-    if (s.brand && s.brand.signin) { const l = document.querySelector('.logo'); l.className = 'wordmark signin'; l.src = '/brand/signin.png'; }
-  } catch (e) {}
+  try { const s = await (await fetch('/api/session')).json(); if (s.user) location.href = '/'; setup = s.setupNeeded; } catch (e) {}
   if (setup) {
     $('ttl').textContent = 'Create your account';
     $('lead').textContent = 'This is the first time Sales Cadence Tool has run. Choose the username and password you\'ll sign in with.';
