@@ -18,7 +18,7 @@ A self-hosted planner for keeping customers on a regular visit/call cadence.
 - **Login.** Password with optional authenticator-app codes; sessions last 30 days.
 - **HTTPS.** Let's Encrypt certificate from the Admin page, with automatic renewal.
 - **Installable** as an app on Android (account menu → Install app) and iPhone (Safari → Share → Add to Home Screen).
-- **Themes.** Match device, Light, Dark (a soft slate), Midnight blue or OLED black, plus an accent color, from the account menu or Settings. Each person's theme follows them across devices.
+- **Themes.** Match device, Light, Dark (graphite), Midnight blue or OLED black, plus an accent color, from the account menu or Settings. Each person's theme follows them across devices.
 
 No npm packages: it runs on Node 22's built-in SQLite and crypto, so there's nothing to install or patch beyond the Node image.
 
