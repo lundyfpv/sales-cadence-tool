@@ -49,7 +49,7 @@ const S = {
   db: null, dl: null, status: 'connecting', customers: new Map(), appts: new Map(), settings: { ...DEFAULT_SETTINGS },
   view: 'week', anchor: today(), monthAnchor: today(), planWeek: null, confirmWeek: null,
   q: '', filter: 'all', sort: 'next', loaded: { c: false, a: false, s: false }, mobile: false, fileCounts: {}, user: null,
-  raw: { customers: [], appointments: [] }, users: [], roles: {}, canEditCompany: true, viewAs: 'me',
+  raw: { customers: [], appointments: [] }, users: [], roles: {}, canEditCompany: true, viewAs: 'me', directory: [], notifications: [],
 };
 const VIEWS = [['week', 'Week'], ['month', 'Month'], ['plan', 'Recap and Plan', 'Fri'], ['confirm', 'Confirm', 'Mon'], ['customers', 'Customers'], ['settings', 'Settings']];
 try { const v = localStorage.getItem('cb.view'); if (v && VIEWS.some(x => x[0] === v)) S.view = v; S.viewAs = localStorage.getItem('cb.viewAs') || 'me'; } catch (e) {}
@@ -68,7 +68,60 @@ function actionItems(a) {
   return [...(prev ? mk(prev) : []), ...mk(a)];
 }
 // Done items are stored by their text on the appointment they were written on (actionsDone). Pass live = false where there's no click handler.
-const taskList = (items, live = true) => items.length ? `<ul class="tasks">${items.map(i => `<li class="${i.done ? 'done' : ''}">${live ? `<label><input type="checkbox" data-act="task-toggle" data-id="${i.from.id}" data-t="${esc(i.t)}" ${i.done ? 'checked' : ''}><span>${esc(i.t)}</span></label>` : `<span>${esc(i.t)}</span>`}</li>`).join('')}</ul>` : '';
+/* ---------- @mentions ---------- */
+const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const mentionRe = u => new RegExp('(^|[^A-Za-z0-9_.@-])@' + reEsc(u) + '(?![A-Za-z0-9_@-]|\\.[A-Za-z0-9])', 'gi');
+// escape text for HTML and show @username as a highlighted name
+function withMentions(t) {
+  let h = esc(t);
+  for (const u of S.directory) h = h.replace(mentionRe(esc(u.username)), (m, pre) => `${pre}<span class="mention" title="@${esc(u.username)}">@${esc(u.name || u.username)}</span>`);
+  return h;
+}
+// customers never see the tags: drop @username from text going into an email
+function stripMentions(t) {
+  let out = String(t || '');
+  for (const u of S.directory) out = out.replace(mentionRe(u.username), '$1');
+  return out.split('\n').map(l => l.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:!?])/g, '$1').trim()).join('\n');
+}
+// Typing "@" in a text box offers the people you can tag; Enter, Tab or a click inserts "@username "
+function attachMentions(ta) {
+  if (!ta) return;
+  let pop = null, items = [], sel = 0, start = -1;
+  const close = () => { pop?.remove(); pop = null; };
+  const pick = u => {
+    const v = ta.value, end = ta.selectionStart;
+    ta.value = v.slice(0, start) + '@' + u.username + ' ' + v.slice(end);
+    const caret = start + u.username.length + 2; ta.setSelectionRange(caret, caret); close(); ta.focus();
+  };
+  const draw = () => {
+    if (!pop) { pop = document.createElement('div'); pop.className = 'mention-pop'; pop.setAttribute('role', 'listbox'); document.body.appendChild(pop); }
+    pop.innerHTML = items.map((u, i) => `<button type="button" role="option" aria-selected="${i === sel}" data-i="${i}">${avatarHtml(u)}<span><b>${esc(u.name || u.username)}</b><span class="muted small"> @${esc(u.username)} · ${esc(S.roles[u.role] || u.role)}</span></span></button>`).join('');
+    pop.querySelectorAll('button').forEach(b => b.onmousedown = e => { e.preventDefault(); pick(items[+b.dataset.i]); });
+    // below the box, or above it when there isn't room, so it never covers what you're typing
+    const r = ta.getBoundingClientRect(), h = pop.offsetHeight;
+    pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + 'px';
+    pop.style.top = (r.bottom + 4 + h <= innerHeight ? r.bottom + 4 : Math.max(8, r.top - h - 4)) + 'px';
+  };
+  const check = () => {
+    const before = ta.value.slice(0, ta.selectionStart), m = /(^|[\s(])@([A-Za-z0-9_.@-]*)$/.exec(before);
+    if (!m) return close();
+    const q = m[2].toLowerCase(); start = before.length - m[2].length - 1;
+    items = S.directory.filter(u => u.id !== S.user?.id && (u.username.toLowerCase().startsWith(q) || (u.name || '').toLowerCase().split(/\s+/).some(w => w.startsWith(q)) || (u.name || '').toLowerCase().startsWith(q))).slice(0, 6);
+    if (!items.length) return close();
+    sel = Math.min(sel, items.length - 1); draw();
+  };
+  ta.addEventListener('input', () => { sel = 0; check(); });
+  ta.addEventListener('click', check);
+  ta.addEventListener('blur', () => setTimeout(close, 150));
+  ta.addEventListener('keydown', e => {
+    if (!pop) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); sel = (sel + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length; draw(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(items[sel]); }
+    else if (e.key === 'Escape') { e.stopPropagation(); close(); }
+  });
+}
+const avatarHtml = u => u?.photo ? `<img class="avatar" src="/api/users/${u.id}/photo?v=${u.photo}" alt="">` : `<span class="avatar">${esc(((u?.name || u?.username || '?').split(/\s+/).map(w => w[0]).slice(0, 2).join('')).toUpperCase())}</span>`;
+const taskList = (items, live = true) => items.length ? `<ul class="tasks">${items.map(i => `<li class="${i.done ? 'done' : ''}">${live ? `<label><input type="checkbox" data-act="task-toggle" data-id="${i.from.id}" data-t="${esc(i.t)}" ${i.done ? 'checked' : ''}><span>${withMentions(i.t)}</span></label>` : `<span>${withMentions(i.t)}</span>`}</li>`).join('')}</ul>` : '';
 
 /* ============ cadence engine ============ */
 /* US federal holidays, worked out for any year. Major ones block visits like time off; the rest only show a label.
@@ -546,9 +599,9 @@ function prevRecapDialog(a) {
     <div class="dlg-h"><h2>Last time with ${esc(apptName(a))}</h2><button class="x" data-close aria-label="Close">×</button></div>
     <div class="dlg-b">
       <div class="muted small">${KINDS[p.kind] || 'Visit'} on ${nice(p.date)}${p.time ? ' · ' + t12(p.time) : ''}${p.recapSent ? ' · recap sent' : ''}</div>
-      <div><div class="label" style="margin-bottom:4px">Recap</div>${lines(p.recap).length ? `<ul class="recap-list">${lines(p.recap).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : '<div class="empty">No recap was written for that meeting.</div>'}</div>
+      <div><div class="label" style="margin-bottom:4px">Recap</div>${lines(p.recap).length ? `<ul class="recap-list">${lines(p.recap).map(l => `<li>${withMentions(l)}</li>`).join('')}</ul>` : '<div class="empty">No recap was written for that meeting.</div>'}</div>
       ${items.length ? `<div><div class="label" style="margin-bottom:4px">My action items from it</div>${taskList(items, false)}</div>` : ''}
-      ${p.notes ? `<div><div class="label" style="margin-bottom:4px">Agenda / prep notes</div><div class="small" style="white-space:pre-wrap">${esc(p.notes)}</div></div>` : ''}
+      ${p.notes ? `<div><div class="label" style="margin-bottom:4px">Agenda / prep notes</div><div class="small" style="white-space:pre-wrap">${withMentions(p.notes)}</div></div>` : ''}
     </div>
     <div class="dlg-f"><button class="btn" id="pr-open">Open that appointment</button><span class="spacer"></span><button class="btn primary" data-close>Close</button></div>`,
     (el, close) => { el.querySelector('#pr-open').onclick = () => { close(); apptDialog(p); }; });
@@ -730,10 +783,10 @@ function apptDialog(a, preset = {}) {
         <label class="fld"><span>Time <span class="muted">(blank = any time that day)</span></span><input type="time" id="ad-t" value="${time || ''}" step="900"></label>
         <label class="fld"><span>Length (min)</span><input type="number" id="ad-l" min="10" step="5" value="${a?.duration || c0?.duration || set().visitLength}"></label>
         <div class="fld"><span>Their rhythm</span><div class="small muted" id="ad-r" style="padding-top:6px"></div></div>
-        <label class="fld full"><span>Agenda / prep notes</span><textarea id="ad-n" placeholder="What you plan to cover…">${esc(a?.notes || '')}</textarea></label>
+        <label class="fld full"><span>Agenda / prep notes</span><textarea id="ad-n" placeholder="What you plan to cover… Type @ to tag someone.">${esc(a?.notes || '')}</textarea></label>
         <label class="fld full"><span>Recap <span class="muted">(after the meeting; one point per line becomes a bullet in your Friday email)</span></span><textarea id="ad-rc" rows="5" placeholder="Reviewed Q4 order&#10;Wants pricing on bulk pallets&#10;Follow up with samples">${esc(a?.recap || '')}</textarea></label>
         ${prevTasks.length ? `<div class="note full"><div class="label" style="margin-bottom:4px">My action items from the ${KINDS[prevTasks[0].from.kind].toLowerCase()} on ${nice(prevTasks[0].from.date)}</div>${taskList(prevTasks, false)}</div>` : ''}
-        <label class="fld full"><span>My action items <span class="muted">(what you'll do for them before the next meeting; one per line)</span></span><textarea id="ad-ai" rows="3" placeholder="e.g. Send bulk pallet pricing">${esc(a?.actions || '')}</textarea></label>
+        <label class="fld full"><span>My action items <span class="muted">(what you'll do for them before the next meeting; one per line)</span></span><textarea id="ad-ai" rows="3" placeholder="e.g. Send bulk pallet pricing. Type @ to tag your manager.">${esc(a?.actions || '')}</textarea></label>
       </div>
       <div id="ad-w"></div>
       ${a ? filesBlock(a.id) : '<div class="note small">You can attach files after the appointment is added.</div>'}
@@ -742,6 +795,7 @@ function apptDialog(a, preset = {}) {
     (el, close) => {
       const g = id => el.querySelector(id);
       if (a) bindFiles(el, a.id);
+      ['#ad-n', '#ad-rc', '#ad-ai'].forEach(id => attachMentions(g(id)));
       const upd = () => {
         const c = S.customers.get(g('#ad-c').value);
         g('#ad-r').textContent = c ? `${cadenceLabel(c)}${hasHome(c) ? ', ' + DAYS_LONG[+c.homeDay] + 's' : ''}${a?.rhythmDate && a.rhythmDate !== a.date ? ' · originally ' + niceShort(a.rhythmDate) : ''}` : '—';
@@ -808,6 +862,7 @@ function outcomeDialog(a, preStatus) {
     <div class="dlg-f"><span class="spacer"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="oc-save">Save</button></div>`,
     (el, close) => {
       let st = preStatus || 'completed';
+      ['#oc-n', '#oc-ai'].forEach(id => attachMentions(el.querySelector(id)));
       el.querySelectorAll('#oc-s button').forEach(b => b.onclick = () => { st = b.dataset.v; el.querySelectorAll('#oc-s button').forEach(x => x.setAttribute('aria-pressed', x === b)); });
       const skip = el.querySelector('#oc-skip'), nx = el.querySelector('#oc-next'), d = el.querySelector('#oc-d');
       const sync = () => { if (nx) nx.hidden = skip.checked; };
@@ -928,6 +983,7 @@ function logTouchDialog(c) {
     </div>
     <div class="dlg-f"><span class="spacer"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="lt-save">Log it</button></div>`,
     (el, close) => {
+      ['#lt-n', '#lt-ai'].forEach(id => attachMentions(el.querySelector(id)));
       el.querySelector('#lt-save').onclick = async () => {
         if (!needDb()) return;
         close();
@@ -953,6 +1009,7 @@ function logTouchDialog(c) {
 /* ============ templates / clipboard / export ============ */
 function bullets(t) { return t ? t.split('\n').map(l => l.trim() ? '- ' + l.trim().replace(/^[-•*]\s*/, '') : '').filter(Boolean).join('\n') : '- '; }
 function fill(tpl, a) {
+  a = { ...a, recap: stripMentions(a.recap), notes: stripMentions(a.notes) };
   const c = S.customers.get(a.customerId) || {};
   const nextOpen = openApptFor(a.customerId, a.id);
   const next = nextOpen ? nice(nextOpen.date) : (c.rhythmDate ? nice(dueDate(c)) : 'a few weeks');
@@ -1300,6 +1357,43 @@ function setOnline(v) {
 }
 let refreshTimer = null;
 function refreshSoon() { clearTimeout(refreshTimer); refreshTimer = setTimeout(loadState, 120); }
+/* ============ notifications tray ============ */
+const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : m < 10080 ? Math.round(m / 1440) + 'd ago' : new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); };
+const dirUser = id => S.directory.find(u => u.id === id);
+function drawBell() {
+  const n = S.notifications.filter(x => !x.read).length, badge = $('#bell-n');
+  badge.hidden = !n; badge.textContent = n > 9 ? '9+' : n;
+  $('#bell').setAttribute('aria-label', n ? `Notifications, ${n} unread` : 'Notifications');
+  if (!$('#tray').hidden) drawTray();
+}
+function drawTray() {
+  const list = S.notifications;
+  $('#tray').innerHTML = `<div class="tray-h"><b>Notifications</b><span class="spacer"></span>${list.some(x => !x.read) ? '<button class="linkbtn small" id="tray-all">Mark all read</button>' : ''}</div>
+    ${list.length ? list.map(x => { const f = dirUser(x.from); return `<button class="note ${x.read ? '' : 'unread'}" data-note="${x.id}">${avatarHtml(f)}<span class="grow"><span class="small"><b>${esc(f ? f.name || f.username : 'Someone')}</b> mentioned you in ${esc(x.field)}${x.customer ? ' · ' + esc(x.customer) : ''}${x.date ? ' · ' + niceShort(x.date) : ''}</span><span class="snip">${withMentions(x.text)}</span><span class="muted small">${ago(x.created)}</span></span></button>`; }).join('')
+      : '<div class="empty" style="padding:10px">Nothing yet. When someone tags you with @ in an agenda, recap or action item, it shows up here.</div>'}`;
+  const all = $('#tray-all'); if (all) all.onclick = async e => { e.stopPropagation(); S.notifications.forEach(x => x.read = true); drawBell(); try { await api('POST', '/api/notifications/read', { all: true }); } catch (x) {} };
+  $('#tray').querySelectorAll('[data-note]').forEach(b => b.onclick = () => openNote(S.notifications.find(x => x.id === b.dataset.note)));
+}
+async function openNote(n) {
+  if (!n) return;
+  $('#tray').hidden = true;
+  if (!n.read) { n.read = true; drawBell(); api('POST', '/api/notifications/read', { ids: [n.id] }).catch(() => {}); }
+  const a = S.raw.appointments.find(x => x.id === n.appt);
+  if (a) {
+    // switch the Viewing picker to whoever owns it, so the appointment is in view
+    if (!S.appts.has(a.id)) { S.viewAs = a.owner === S.user.id ? 'me' : S.users.some(u => u.id === a.owner) ? a.owner : 'team'; try { localStorage.setItem('cb.viewAs', S.viewAs); } catch (e) {} applyView(); drawViewAs(); render(); }
+    return apptDialog(S.appts.get(a.id));
+  }
+  // not theirs to open (outside their team, or deleted): show what was written
+  const f = dirUser(n.from);
+  openDialog(`<div class="dlg-h"><h2>${esc(f ? f.name || f.username : 'Someone')} mentioned you</h2><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="dlg-b"><div class="muted small">In ${esc(n.field)}${n.customer ? ' · ' + esc(n.customer) : ''}${n.date ? ' · ' + nice(n.date) : ''} · ${ago(n.created)}</div><div style="white-space:pre-wrap">${withMentions(n.text)}</div>
+    <p class="muted small" style="margin:0">That appointment isn't on your team's calendar, so this is the part that mentions you.</p></div>
+    <div class="dlg-f"><span class="spacer"></span><button class="btn primary" data-close>Close</button></div>`, () => {});
+}
+$('#bell').onclick = e => { e.stopPropagation(); const t = $('#tray'); t.hidden = !t.hidden; $('#bell').setAttribute('aria-expanded', !t.hidden); if (!t.hidden) { $('#menu-pop').hidden = true; drawTray(); } };
+document.addEventListener('click', e => { const t = $('#tray'); if (!t.hidden && !t.contains(e.target) && !e.target.closest('#bell')) t.hidden = true; });
+
 /* ============ team: whose customers and calendar are showing ============ */
 // 'me', one team member's id, or 'team' for everyone you can see
 const viewOwner = () => S.viewAs === 'team' ? null : S.users.some(u => u.id === S.viewAs) ? S.viewAs : S.user?.id;
@@ -1326,7 +1420,7 @@ async function loadState() {
   try {
     const st = await api('GET', '/api/state');
     S.raw = st; S.users = st.users || []; S.roles = st.roles || {}; S.canEditCompany = st.canEditCompany !== false;
-    S.user = st.user; applyView(); drawViewAs();
+    S.user = st.user; S.directory = st.directory || []; S.notifications = st.notifications || []; applyView(); drawViewAs(); drawBell();
     S.settings = { ...DEFAULT_SETTINGS, ...(st.settings || {}) };
     S.fileCounts = st.fileCounts || {};
     S.status = 'ready';
@@ -1347,7 +1441,7 @@ function listen() {
 }
 /* account menu */
 const menuBtn = $('#menu-btn'), menuPop = $('#menu-pop');
-menuBtn.onclick = e => { e.stopPropagation(); menuPop.hidden = !menuPop.hidden; menuBtn.setAttribute('aria-expanded', !menuPop.hidden); if (!menuPop.hidden) { $('#menu-who').textContent = S.user ? `${S.user.name || S.user.username} · ${roleLabel(S.user)}` : ''; drawThemeMenu(); } };
+menuBtn.onclick = e => { e.stopPropagation(); $('#tray').hidden = true; menuPop.hidden = !menuPop.hidden; menuBtn.setAttribute('aria-expanded', !menuPop.hidden); if (!menuPop.hidden) { $('#menu-who').textContent = S.user ? `${S.user.name || S.user.username} · ${roleLabel(S.user)}` : ''; drawThemeMenu(); } };
 document.addEventListener('click', e => { if (!menuPop.hidden && !menuPop.contains(e.target)) { menuPop.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); } });
 const THEME_MODES = [['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark'], ['midnight', 'Midnight blue'], ['oled', 'OLED black']];
 const drawThemeMenu = () => {
