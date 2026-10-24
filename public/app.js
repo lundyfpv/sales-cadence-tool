@@ -609,7 +609,7 @@ function viewSettings() {
   const th = { ...DEFAULT_SETTINGS.theme, ...(s.theme || {}) };
   return `<div class="toolbar"><h2>Settings</h2><span class="spacer"></span><a class="btn" href="/admin">Admin: login, HTTPS, backups</a></div><div class="settings">
     <div class="panel"><h3>Appearance</h3>
-      <div class="fld"><span>Theme</span><div class="seg">${[['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark'], ['oled', 'OLED black']].map(([k, l]) => `<button data-act="theme-mode" data-v="${k}" aria-pressed="${th.mode === k}">${l}</button>`).join('')}</div></div>
+      <div class="fld"><span>Theme</span><div class="seg">${[['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark'], ['midnight', 'Midnight blue'], ['oled', 'OLED black']].map(([k, l]) => `<button data-act="theme-mode" data-v="${k}" aria-pressed="${th.mode === k}">${l}</button>`).join('')}</div></div>
       <div class="fld"><span>Accent color</span><div class="swatches">${ACCENTS.map(([k, l, c]) => `<button class="swatch-btn" data-act="theme-accent" data-v="${k}" aria-pressed="${th.accent === k}" title="${l}" aria-label="${l}" style="background:${c}"></button>`).join('')}</div></div>
       <div class="fld"><span>Calendar weeks start on</span><div class="seg">${[[0, 'Sunday'], [1, 'Monday']].map(([k, l]) => `<button data-act="week-start" data-v="${k}" aria-pressed="${ws === k}">${l}</button>`).join('')}</div></div>
       <p class="muted small" style="margin:0">Saved to your account, so your phone and computer match.</p>
@@ -1323,7 +1323,7 @@ function listen() {
 const menuBtn = $('#menu-btn'), menuPop = $('#menu-pop');
 menuBtn.onclick = e => { e.stopPropagation(); menuPop.hidden = !menuPop.hidden; menuBtn.setAttribute('aria-expanded', !menuPop.hidden); if (!menuPop.hidden) { $('#menu-who').textContent = S.user ? `${S.user.name || S.user.username} · ${roleLabel(S.user)}` : ''; drawThemeMenu(); } };
 document.addEventListener('click', e => { if (!menuPop.hidden && !menuPop.contains(e.target)) { menuPop.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); } });
-const THEME_MODES = [['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark'], ['oled', 'OLED black']];
+const THEME_MODES = [['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark'], ['midnight', 'Midnight blue'], ['oled', 'OLED black']];
 const drawThemeMenu = () => {
   const mode = { ...DEFAULT_SETTINGS.theme, ...(set().theme || {}) }.mode;
   $('#menu-themes').innerHTML = THEME_MODES.map(([k, l]) => `<button data-mode="${k}" aria-pressed="${mode === k}"><span class="tick">${mode === k ? ICON.check : ''}</span>${l}</button>`).join('');
