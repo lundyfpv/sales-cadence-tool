@@ -19,7 +19,7 @@ A self-hosted planner for keeping customers on a regular visit/call cadence.
 - **Login.** Password with optional authenticator-app codes; sessions last 30 days.
 - **HTTPS.** Let's Encrypt certificate from the Admin page, with automatic renewal.
 - **Installable** as an app on Android (account menu → Install app) and iPhone (Safari → Share → Add to Home Screen).
-- **Company logo.** An admin can upload their company's logo under Admin → Company logo. Every icon is made from it, including the header, sign-in page, browser tab and the Android and iPhone home-screen icons. **Use default logo** switches back. The logo is stored on your server only, never in this repository.
+- **Company logo.** An admin can upload their company's logo under Admin → Company logo. Every icon is made from it, including the header, sign-in page, browser tab and the Android and iPhone home-screen icons. Two optional wide logos can go on the sign-in page (a stacked logo fits best) and in the header on wide screens (a horizontal logo). In the dark themes they sit on a white plate so the brand colors stay readable. **Use default logo** switches everything back. The logo is stored on your server only, never in this repository.
 - **Themes.** Match device, Light, Dark (graphite), Midnight blue or OLED black, plus an accent color, from the account menu or Settings. Each person's theme follows them across devices.
 
 No npm packages: it runs on Node 22's built-in SQLite and crypto, so there's nothing to install or patch beyond the Node image.

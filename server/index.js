@@ -109,6 +109,10 @@ function notifyMentions(author, apptId) {
 // the built-in icons, so the header, sign-in page, tab and home-screen icons all switch; deleting it restores the defaults.
 const BRAND_DIR = path.join(store.DATA_DIR, 'brand');
 const BRAND_FILES = { '/icons/icon-192.png': 'icon-192.png', '/icons/icon-512.png': 'icon-512.png', '/icons/maskable-512.png': 'maskable-512.png', '/icons/apple-touch-icon.png': 'apple-touch-icon.png', '/icons/icon.svg': 'favicon-64.png' };
+// optional wide logos: one for the sign-in page, one for the header on wide screens
+const BRAND_WIDE = { '/brand/signin.png': 'signin.png', '/brand/header.png': 'header.png' };
+const brandHas = f => fs.existsSync(path.join(BRAND_DIR, f));
+const brandInfo = () => ({ icons: brandHas('icon-512.png'), signin: brandHas('signin.png'), header: brandHas('header.png') });
 function serveBrand(req, res, file) {
   const st = fs.statSync(file), etag = `"b${st.mtimeMs.toString(36)}"`;
   const headers = { 'Content-Type': 'image/png', ETag: etag, 'Cache-Control': 'no-cache' };
@@ -195,6 +199,7 @@ async function handle(req, res) {
     if (p === '/admin') return session ? serveStatic(req, res, '/admin.html') : redirect(res, '/login');
     if (p === '/app.html' || p === '/admin.html') return redirect(res, '/');
     if (BRAND_FILES[p] && fs.existsSync(path.join(BRAND_DIR, BRAND_FILES[p]))) return serveBrand(req, res, path.join(BRAND_DIR, BRAND_FILES[p]));
+    if (BRAND_WIDE[p]) return brandHas(BRAND_WIDE[p]) ? serveBrand(req, res, path.join(BRAND_DIR, BRAND_WIDE[p])) : fail(res, 404, 'Not found');
     if (!p.startsWith('/api/')) return serveStatic(req, res, p);
   }
 
@@ -206,7 +211,7 @@ async function handle(req, res) {
   try {
     /* ---- session endpoints (no login needed) ---- */
     if (p === '/api/session' && req.method === 'GET') {
-      return send(res, 200, { user: session ? session.user : null, setupNeeded: auth.userCount() === 0, version: pkg.version });
+      return send(res, 200, { user: session ? session.user : null, setupNeeded: auth.userCount() === 0, version: pkg.version, brand: brandInfo() });
     }
     if (p === '/api/setup' && req.method === 'POST') {
       if (auth.userCount() > 0) return fail(res, 409, 'An account already exists. Sign in instead.');
@@ -248,7 +253,7 @@ async function handle(req, res) {
     const adminOnly = () => { if (!auth.isAdmin(user)) throw forbidden(); };
 
     if (p === '/api/state' && req.method === 'GET') {
-      return send(res, 200, { ...store.state(owners, user.id), user, canEditCompany: canEditCompany(user), roles: auth.ROLES,
+      return send(res, 200, { ...store.state(owners, user.id), user, canEditCompany: canEditCompany(user), roles: auth.ROLES, brand: brandInfo(),
         users: users.filter(u => owners.includes(u.id)).map(auth.publicUser),
         // everyone who can be @mentioned, and this person's notifications
         directory: users.filter(u => u.active).map(u => ({ id: u.id, username: u.username, name: u.name || '', role: u.role, photo: u.photo || null })),
@@ -345,7 +350,7 @@ async function handle(req, res) {
         acme: store.kvGet('acme', {}), cert: acme.certInfo(), httpsListening: !!httpsServer, ports: { http: HTTP_PORT, https: HTTPS_PORT },
         job: { running: job.running, log: job.log, error: job.error, finished: job.finished },
         sessions: auth.q.sCount.get(user.id, Date.now()).n, totp: user.totp, username: user.username,
-        brand: fs.existsSync(path.join(BRAND_DIR, 'icon-512.png')),
+        brand: brandInfo(),
       });
     }
     if (p === '/api/admin/acme' && req.method === 'POST') {
@@ -408,7 +413,7 @@ async function handle(req, res) {
     if (p === '/api/admin/brand' && req.method === 'POST') {
       adminOnly();
       const name = url.searchParams.get('file');
-      if (!Object.values(BRAND_FILES).includes(name)) return fail(res, 400, 'Unknown icon file.');
+      if (![...Object.values(BRAND_FILES), ...Object.values(BRAND_WIDE)].includes(name)) return fail(res, 400, 'Unknown icon file.');
       if (req.headers['content-type'] !== 'image/png') return fail(res, 400, 'Icons must be PNG.');
       const buf = await new Promise((resolve, reject) => { const chunks = []; let n = 0;
         req.on('data', c => { n += c.length; if (n > 3 * 1048576) { reject(Object.assign(new Error('That image is too large.'), { status: 413 })); req.destroy(); } else chunks.push(c); });
@@ -420,7 +425,10 @@ async function handle(req, res) {
     }
     if (p === '/api/admin/brand' && req.method === 'DELETE') {
       adminOnly();
-      for (const f of Object.values(BRAND_FILES)) try { fs.unlinkSync(path.join(BRAND_DIR, f)); } catch {}
+      // one wide logo (?file=signin.png or header.png), or everything to go back to the built-in look
+      const one = url.searchParams.get('file');
+      const files = one ? (Object.values(BRAND_WIDE).includes(one) ? [one] : []) : [...Object.values(BRAND_FILES), ...Object.values(BRAND_WIDE)];
+      for (const f of files) try { fs.unlinkSync(path.join(BRAND_DIR, f)); } catch {}
       return send(res, 200, { ok: true });
     }
     if (p === '/api/admin/backup' && req.method === 'GET') {

@@ -20,7 +20,11 @@
     loadPeople();
     // HTTPS and backups are for admins; everyone else gets their own sign-in settings
     $('https').hidden = $('backup').hidden = $('brand').hidden = !!s.limited;
-    if (!s.limited) { $('br-reset').hidden = !s.brand; $('br-now').src = '/icons/icon-192.png?t=' + Date.now(); }
+    if (!s.limited) {
+      $('br-reset').hidden = !(s.brand.icons || s.brand.signin || s.brand.header); $('br-now').src = '/icons/icon-192.png?t=' + Date.now();
+      for (const k of ['signin', 'header']) { $('br-' + k).hidden = $('br-' + k + '-del').hidden = !s.brand[k]; if (s.brand[k]) $('br-' + k).src = `/brand/${k}.png?t=${Date.now()}`; }
+      drawWordmark(s.brand.header);
+    }
     if (s.limited) { $('s-user').textContent = s.username; $('s-sess').textContent = s.sessions; $('s-totp').textContent = s.totp ? 'On' : 'Off'; drawTotp(s.totp); return; }
     $('p-http').textContent = s.ports.http; $('p-https').textContent = s.ports.https;
     const c = s.cert, pill = $('cert-pill');
@@ -88,6 +92,14 @@
   $('b-cancel').onclick = () => { pending = null; $('b-confirm').hidden = true; $('b-file').value = ''; };
   $('b-go').onclick = async () => { try { const r = await api('POST', '/api/admin/restore', pending); $('b-msg').textContent = `Restored ${r.customers} customers and ${r.appointments} appointments.`; } catch (e) { $('b-msg').textContent = e.message; } $('b-confirm').hidden = true; pending = null; load(); };
 
+  // the header on this page shows the wide logo too, like the planner
+  function drawWordmark(on) {
+    const brand = document.querySelector('.brand'); let wm = brand.querySelector('.wordmark');
+    if (on && !wm) { wm = document.createElement('img'); wm.className = 'wordmark'; wm.alt = 'Sales Cadence Tool'; brand.insertBefore(wm, brand.querySelector('h1')); }
+    if (wm) { if (on) wm.src = '/brand/header.png?t=' + Date.now(); else wm.remove(); }
+    brand.classList.toggle('has-wordmark', !!on);
+  }
+  fetch('/api/session').then(r => r.json()).then(s => drawWordmark(s.brand && s.brand.header)).catch(() => {});
   /* ---- company logo ----
      Every icon is drawn here from the uploaded image: transparent ones for the header, tab and "any" icons, and ones on a
      solid background for Android (maskable: the logo kept inside the middle 80% that survives a circle crop) and iPhone. */
@@ -118,6 +130,27 @@
     } catch (e) { $('br-msg').textContent = e.message; }
     $('br-file').value = '';
   };
+  // wide logos keep their shape: the sign-in one up to 900px wide, the header one 96px tall (sharp at 32px)
+  async function wideImage(file, maxW, maxH) {
+    const url = URL.createObjectURL(file);
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('That image couldn\'t be read.')); i.src = url; });
+    const w = img.naturalWidth || 900, h = img.naturalHeight || 300, k = Math.min(maxW / w, maxH / h, 1);
+    const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+    const x = c.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url); return new Promise(res => c.toBlob(res, 'image/png'));
+  }
+  for (const [k, maxW, maxH] of [['signin', 900, 450], ['header', 1200, 96]]) {
+    $(`br-${k}-file`).onchange = async () => {
+      const f = $(`br-${k}-file`).files[0]; if (!f) return;
+      try {
+        const r = await fetch(`/api/admin/brand?file=${k}.png`, { method: 'POST', headers: { 'X-CB': '1', 'Content-Type': 'image/png' }, body: await wideImage(f, maxW, maxH) });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Upload failed.');
+        toast('Logo updated.'); load();
+      } catch (e) { toast(e.message); }
+      $(`br-${k}-file`).value = '';
+    };
+    $(`br-${k}-del`).onclick = async () => { try { await api('DELETE', `/api/admin/brand?file=${k}.png`); load(); } catch (e) { toast(e.message); } };
+  }
   $('br-reset').onclick = async () => { try { await api('DELETE', '/api/admin/brand'); $('br-msg').textContent = 'Back to the default logo.'; load(); } catch (e) { toast(e.message); } };
 
   /* ---- profile photos ---- */

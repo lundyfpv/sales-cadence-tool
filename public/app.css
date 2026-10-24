@@ -440,3 +440,14 @@ a.btn.primary { color: var(--accent-ink); }
   .viewas { max-width: 19vw; }
   .menu-btn { width: 30px; height: 30px; }
 }
+
+/* company wide logos: on a white plate so the brand colors read in the dark themes */
+.wordmark { background: #fff; border-radius: 7px; padding: 3px 7px; height: 32px; width: auto; display: block; }
+.brand img.wordmark { height: 32px; width: auto; border-radius: 7px; align-self: center; }
+.wordmark.signin { height: auto; width: min(100%, 300px); max-height: 150px; object-fit: contain; padding: 8px 12px; border-radius: 12px; align-self: flex-start; }
+@media (min-width: 1101px) {
+  /* the wide logo stands in for the round icon and the app name, so the tabs keep their room */
+  .brand.has-wordmark > img:first-child, .brand.has-wordmark h1 { display: none; }
+}
+/* not enough room below that: the round icon and the app name, as usual */
+@media (max-width: 1100px) { .wordmark:not(.signin) { display: none; } }
