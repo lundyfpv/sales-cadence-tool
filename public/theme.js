@@ -1,6 +1,6 @@
 // Applies the saved theme (system, light, dark, midnight, oled) and accent before the page paints.
 (function () {
-  var COLORS = { light: '#ffffff', dark: '#222c3b', midnight: '#111a2c', oled: '#000000' };
+  var COLORS = { light: '#ffffff', dark: '#1a1d23', midnight: '#111a2c', oled: '#000000' };
   function apply(mode, accent) {
     var r = document.documentElement;
     mode = mode || 'system'; accent = accent || 'slate';
