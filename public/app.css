@@ -367,3 +367,4 @@ a.btn.primary { color: var(--accent-ink); }
 .avatar.lg { width: 72px; height: 72px; font-size: 1.4rem; }
 .menu-btn:has(img.avatar) { padding: 0; overflow: hidden; }
 .menu-btn img.avatar { width: 100%; height: 100%; }
+.recap-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
