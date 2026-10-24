@@ -339,7 +339,7 @@ function viewWeek() {
     <h2 class="wtitle">${ws === thisW ? 'This week' : ws === nextW ? 'Next week' : 'Week of ' + niceShort(ws)}</h2>
     <div class="seg"><button data-act="wk" data-d="-7" aria-label="Previous week">‹</button><button data-act="wk-this" aria-pressed="${ws === thisW}">This week</button><button data-act="wk-next" aria-pressed="${ws === nextW}">Next week</button><button data-act="wk" data-d="7" aria-label="Following week">›</button></div>
     <span class="muted small">${label}</span><span class="spacer"></span>
-    <button class="btn" data-act="export-week">Export to calendar</button>
+    <button class="btn hide-mobile" data-act="export-week">Export to calendar</button>
     <button class="btn primary" data-act="new-appt" data-date="${firstAllowedFrom(ws < t ? t : ws, 'visit')}">+ Appointment</button>
   </div>`;
   const side = weekSide(ws, days);
@@ -595,7 +595,7 @@ function viewCustomers() {
     <span class="spacer"></span><button class="btn" data-act="import">Import</button><button class="btn" data-act="export-cust">Export</button><button class="btn primary" data-act="new-cust">+ Customer</button></div>
   ${ex ? `<div class="note warn row" style="margin-bottom:12px"><span style="flex:1;min-width:0">The customers marked “example” are sample data so you can see how things work. Delete them when you're ready to bring in your own.</span><button class="btn sm" data-act="clear-examples">Delete examples</button></div>` : ''}
   ${S.customers.size === 0 ? `<div class="panel" style="max-width:560px"><h3>No customers yet</h3><p class="muted" style="margin:0">Import a spreadsheet or CSV from your CRM, paste rows copied from Excel, or add customers one at a time. Everyone starts on a ${set().defaultCadence}-week cadence, and you can change any of them.</p><div class="row"><button class="btn primary" data-act="import">Import customers</button><button class="btn" data-act="new-cust">Add one</button></div></div>` : `
-  <div class="tbl-wrap"><table><thead><tr><th><button class="linkbtn label" data-act="csort" data-s="name">Customer${S.sort === 'name' ? ' ↓' : ''}</button></th><th>Type</th><th>Cadence</th><th>Day</th><th>Last touch</th><th><button class="linkbtn label" data-act="csort" data-s="next">Next${S.sort === 'next' ? ' ↓' : ''}</button></th></tr></thead><tbody>
+  <div class="tbl-wrap"><table class="ctable"><thead><tr><th><button class="linkbtn label" data-act="csort" data-s="name">Customer${S.sort === 'name' ? ' ↓' : ''}</button></th><th>Type</th><th>Cadence</th><th>Day</th><th>Last touch</th><th><button class="linkbtn label" data-act="csort" data-s="next">Next${S.sort === 'next' ? ' ↓' : ''}</button></th></tr></thead><tbody>
   ${list.map(({ c, st }) => `<tr data-act="open-cust" data-id="${c.id}" class="${c.active === false ? 'paused' : ''}"><td><b>${esc(custName(c))}</b>${custTags(c)}${c.example ? ' <span class="pill">example</span>' : ''}<div class="sub">${esc([S.viewAs === 'team' && c.owner && userName(c.owner), c.custId && '#' + c.custId, c.contact, c.address, (c.products || []).join(', ')].filter(Boolean).join(' · '))}</div></td><td><span class="pill ${isTouch(c.kind) ? 'touch' : 'ok'}">${ICON[c.kind || 'visit']} ${KINDS[c.kind || 'visit']}</span></td><td>${cadenceLabel(c)}</td><td>${hasHome(c) ? DAYS[+c.homeDay] : '<span class="muted">—</span>'}</td><td>${c.lastTouch ? niceShort(c.lastTouch) : '<span class="muted">—</span>'}</td><td><span class="pill ${st.cls}">${st.text}</span></td></tr>`).join('')}
   </tbody></table>${list.length ? '' : '<div class="empty" style="padding:14px">No customers match.</div>'}</div>`}`;
 }
@@ -1317,7 +1317,7 @@ function drawViewAs() {
   const sel = $('#viewas'), others = S.users.filter(u => u.id !== S.user.id);
   sel.hidden = !others.length; if (!others.length) return;
   const cur = S.viewAs === 'team' || others.some(u => u.id === S.viewAs) ? S.viewAs : 'me';
-  sel.innerHTML = `<option value="me">Viewing: me</option>${others.map(u => `<option value="${u.id}">${esc(u.name || u.username)} · ${esc(S.roles[u.role] || u.role)}${u.active ? '' : ' (off)'}</option>`).join('')}<option value="team">Whole team</option>`;
+  sel.innerHTML = `<option value="me">${matchMedia('(max-width: 760px)').matches ? 'Me' : 'Viewing: me'}</option>${others.map(u => `<option value="${u.id}">${esc(u.name || u.username)} · ${esc(S.roles[u.role] || u.role)}${u.active ? '' : ' (off)'}</option>`).join('')}<option value="team">Whole team</option>`;
   sel.value = cur;
 }
 $('#viewas').onchange = e => { S.viewAs = e.target.value; try { localStorage.setItem('cb.viewAs', S.viewAs); } catch (x) {} applyView(); render(); };
